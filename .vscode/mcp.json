@@ -1,0 +1,20 @@
+{
+  "servers": {
+    "fetch": {
+      "command": "/home/ubuntu/.local/bin/uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspaces/stock-selector"]
+    },
+    "sqlite": {
+      "command": "/home/ubuntu/.local/bin/uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "/workspaces/stock-selector/data/stock_analysis.db"]
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    }
+  }
+}
