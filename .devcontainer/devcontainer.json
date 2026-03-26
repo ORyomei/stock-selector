@@ -1,0 +1,25 @@
+{
+  "name": "stock-selector",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "runArgs": ["--name", "stock-selector"],
+  "updateRemoteUserUID": true,
+  "remoteUser": "ubuntu",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "chat.agent.enabled": true,
+        "chat.tools.terminal.ignoreDefaultAutoApproveRules": true,
+        "chat.tools.terminal.autoApprove": {
+          "/^git\\s+commit\\b/": false,
+          "/^git\\s+push\\b/": false,
+          "/^git\\s+commit-tree\\b/": false,
+          "/^git\\s+send-pack\\b/": false,
+          "/^gh\\s+pr\\s+create\\b/": false,
+          "/.*/": true
+        }
+      }
+    }
+  }
+}
