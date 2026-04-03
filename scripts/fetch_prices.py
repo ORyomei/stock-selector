@@ -11,15 +11,26 @@ import argparse
 import json
 import sys
 
+import time
 import yfinance as yf
 
 
-def fetch(ticker: str, period: str = "3mo", interval: str = "1d"):
-    t = yf.Ticker(ticker)
-    info = t.info
-    hist = t.history(period=period, interval=interval)
+def fetch(ticker: str, period: str = "3mo", interval: str = "1d", retries: int = 2):
+    hist = None
+    info = {}
+    for attempt in range(retries + 1):
+        try:
+            t = yf.Ticker(ticker)
+            info = t.info
+            hist = t.history(period=period, interval=interval)
+            if not hist.empty:
+                break
+        except Exception as e:
+            print(f"WARN: {ticker} 取得失敗 (attempt {attempt + 1}): {e}", file=sys.stderr)
+        if attempt < retries:
+            time.sleep(1.0 * (attempt + 1))
 
-    if hist.empty:
+    if hist is None or hist.empty:
         print(f"ERROR: {ticker} のデータが取得できませんでした", file=sys.stderr)
         sys.exit(1)
 

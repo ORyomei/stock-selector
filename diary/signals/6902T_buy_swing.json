@@ -1,0 +1,12 @@
+{
+  "ticker": "6902.T",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 2120,
+  "stop_loss_price": 1700,
+  "take_profit_price": 2400,
+  "confidence": 0.75,
+  "timespan": "swing",
+  "score": 55,
+  "reason": "スイング買い: 利益成長+26%, ローム買収好感, 中計CORE2030評価, ニュース最良"
+}

@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "order_id": null,
+  "ticker": "6902.T",
+  "action": "BUY",
+  "quantity": 892,
+  "entry_price": 2120,
+  "fill_price": null,
+  "status": "ERROR",
+  "pnl": null,
+  "reason": "ValueError: Failed to fetch price for 6902.T",
+  "timestamp": "2026-04-01T16:24:18.609409+00:00"
+}

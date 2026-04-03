@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "08cec7ba-f576-435b-b876-6de9bef73362",
+  "ticker": "INTC",
+  "action": "BUY",
+  "quantity": 20,
+  "entry_price": 55.58,
+  "fill_price": 49.854970220947266,
+  "status": "FILLED",
+  "pnl": -0.2,
+  "reason": "Order filled: 20 @ 49.854970220947266",
+  "timestamp": "2026-04-02T18:20:15.864466+00:00"
+}

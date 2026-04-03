@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "e3bcc77a-cdd6-4763-bada-1d124dac232b",
+  "ticker": "9433.T",
+  "action": "BUY",
+  "quantity": 842,
+  "entry_price": 2798.96,
+  "fill_price": 2679.0357,
+  "status": "FILLED",
+  "pnl": -1139.43,
+  "reason": "Order filled: 842 @ 2679.0357",
+  "timestamp": "2026-04-02T05:04:05.096178+00:00"
+}

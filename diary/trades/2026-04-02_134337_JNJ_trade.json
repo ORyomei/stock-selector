@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "b5d9eeb4-a4df-45c6-b088-877c06da72f4",
+  "ticker": "JNJ",
+  "action": "BUY",
+  "quantity": 29,
+  "entry_price": 254.82,
+  "fill_price": 246.88936433715818,
+  "status": "FILLED",
+  "pnl": -1.43,
+  "reason": "Order filled: 29 @ 246.88936433715818",
+  "timestamp": "2026-04-02T13:43:35.518070+00:00"
+}

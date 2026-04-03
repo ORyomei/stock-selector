@@ -1,0 +1,12 @@
+{
+  "ticker": "BMY",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 64.44,
+  "stop_loss_price": 58.34,
+  "take_profit_price": 67.15,
+  "confidence": 0.8,
+  "timespan": "swing",
+  "score": 25,
+  "reason": "auto_trade[AI]: score=25, 買い"
+}

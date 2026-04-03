@@ -1,0 +1,12 @@
+{
+  "ticker": "MRVL",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 118.09,
+  "stop_loss_price": 92.48,
+  "take_profit_price": 120.87,
+  "confidence": 0.80,
+  "timespan": "swing",
+  "score": 30,
+  "reason": "MACDヒストグラム拡大+上昇トレンド, 売上22%成長, ROE19.3%, 40名strong_buy, 目標$120.88, 20日間+36%上昇"
+}

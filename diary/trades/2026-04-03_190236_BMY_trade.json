@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "fc1a15cc-85f0-4223-8267-77b1a6f65a09",
+  "ticker": "BMY",
+  "action": "CLOSE",
+  "quantity": 99,
+  "entry_price": 61.742345542144776,
+  "fill_price": 59.58807847442627,
+  "status": "FILLED",
+  "pnl": -212.09,
+  "reason": "Manual close: 99 shares",
+  "timestamp": "2026-04-03T19:02:36.047320+00:00"
+}

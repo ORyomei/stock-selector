@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "order_id": "9e55b2cd-7b18-4565-bea2-89384e0ba095",
+  "ticker": "PFE",
+  "action": "BUY",
+  "quantity": 649,
+  "entry_price": 28.27,
+  "fill_price": null,
+  "status": "PENDING",
+  "pnl": null,
+  "reason": "Order status: PENDING",
+  "timestamp": "2026-04-01T16:35:58.513488+00:00"
+}

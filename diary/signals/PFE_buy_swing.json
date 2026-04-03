@@ -1,0 +1,12 @@
+{
+  "ticker": "PFE",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 29.50,
+  "stop_loss_price": 26.74,
+  "take_profit_price": 30.73,
+  "confidence": 0.70,
+  "timespan": "swing",
+  "score": 20,
+  "reason": "60日高値ブレイクアウト, MACDゴールデンクロス, RSI62.78(過熱前), アナリスト買い推奨(26名平均$28.58), 予想PER10.02割安, 配当6.1%"
+}

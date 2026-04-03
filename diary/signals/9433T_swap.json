@@ -1,0 +1,12 @@
+{
+  "ticker": "9433.T",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 2798.96,
+  "stop_loss_price": 2518.92,
+  "take_profit_price": 2923.43,
+  "confidence": 0.72,
+  "timespan": "swing",
+  "score": 35,
+  "reason": "AI swap: AAPL(-10)→KDDI(35), ディフェンシブ通信株, 60d上昇率79.7%"
+}

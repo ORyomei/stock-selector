@@ -1,0 +1,12 @@
+{
+  "ticker": "NFLX",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 104.38,
+  "stop_loss_price": 91.51,
+  "take_profit_price": 110.1,
+  "confidence": 0.8,
+  "timespan": "swing",
+  "score": 25,
+  "reason": "auto_swap: 4519.T→NFLX, score=25"
+}

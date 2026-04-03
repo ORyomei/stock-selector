@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "084bae66-cde3-4a2e-b0db-be3b2bbf3cbe",
+  "ticker": "AMD",
+  "action": "BUY",
+  "quantity": 6,
+  "entry_price": 235.25,
+  "fill_price": 214.40647440490721,
+  "status": "FILLED",
+  "pnl": -0.26,
+  "reason": "Order filled: 6 @ 214.40647440490721",
+  "timestamp": "2026-04-02T15:41:15.914192+00:00"
+}

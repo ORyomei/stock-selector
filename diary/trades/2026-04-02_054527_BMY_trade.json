@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "1cc9ceb0-dd04-4636-9db6-8648fb42fde7",
+  "ticker": "BMY",
+  "action": "BUY",
+  "quantity": 164,
+  "entry_price": 64.44,
+  "fill_price": 61.742345542144776,
+  "status": "FILLED",
+  "pnl": -2.02,
+  "reason": "Order filled: 164 @ 61.742345542144776",
+  "timestamp": "2026-04-02T05:45:21.121531+00:00"
+}

@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "a87260ed-16e7-42c5-98e1-d8e0aa61a281",
+  "ticker": "7203.T",
+  "action": "BUY",
+  "quantity": 2125,
+  "entry_price": 3300,
+  "fill_price": NaN,
+  "status": "FILLED",
+  "pnl": NaN,
+  "reason": "Order filled: 2125 @ nan",
+  "timestamp": "2026-04-01T16:08:58.189423+00:00"
+}

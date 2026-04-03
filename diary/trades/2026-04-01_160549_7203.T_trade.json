@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "order_id": null,
+  "ticker": "7203.T",
+  "action": "BUY",
+  "quantity": 4250,
+  "entry_price": 3200,
+  "fill_price": null,
+  "status": "ERROR",
+  "pnl": null,
+  "reason": "ValueError: Insufficient funds. Required: JPY 13,602,720, Available: JPY 10,000,000",
+  "timestamp": "2026-04-01T16:05:49.552356+00:00"
+}

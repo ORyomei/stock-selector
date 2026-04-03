@@ -1,0 +1,12 @@
+{
+  "ticker": "AMD",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 235.25,
+  "stop_loss_price": 188.79,
+  "take_profit_price": 255.89,
+  "confidence": 0.8,
+  "timespan": "swing",
+  "score": 35,
+  "reason": "auto_swap: INTC→AMD, score=35"
+}

@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "107c4861-e484-40d8-b3f7-7fd730e6803f",
+  "ticker": "AAPL",
+  "action": "CLOSE",
+  "quantity": 50,
+  "entry_price": 254.3068,
+  "fill_price": 254.1291566772461,
+  "status": "FILLED",
+  "pnl": -6.34,
+  "reason": "Manual close: 50 shares",
+  "timestamp": "2026-04-01T16:17:15.520641+00:00"
+}

@@ -10,6 +10,7 @@ import argparse
 import json
 import math
 import sys
+import time
 
 import numpy as np
 import yfinance as yf
@@ -18,11 +19,21 @@ import pandas as pd
 
 
 def compute_score(ticker: str, period: str = "6mo"):
-    t = yf.Ticker(ticker)
-    info = t.info
-    hist = t.history(period=period, interval="1d")
+    hist = None
+    info = {}
+    for attempt in range(3):
+        try:
+            t = yf.Ticker(ticker)
+            info = t.info
+            hist = t.history(period=period, interval="1d")
+            if hist is not None and not hist.empty and len(hist) >= 30:
+                break
+        except Exception as e:
+            print(f"WARN: {ticker} 取得失敗 (attempt {attempt + 1}): {e}", file=sys.stderr)
+        if attempt < 2:
+            time.sleep(1.0 * (attempt + 1))
 
-    if hist.empty or len(hist) < 30:
+    if hist is None or hist.empty or len(hist) < 30:
         print(f"ERROR: {ticker} のデータ不足（最低30日分が必要）", file=sys.stderr)
         sys.exit(1)
 

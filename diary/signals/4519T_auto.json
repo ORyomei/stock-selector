@@ -1,0 +1,12 @@
+{
+  "ticker": "4519.T",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 9867.74,
+  "stop_loss_price": 8360.83,
+  "take_profit_price": 10537.48,
+  "confidence": 0.8,
+  "timespan": "swing",
+  "score": 20,
+  "reason": "auto_trade[AI]: score=20, 買い"
+}

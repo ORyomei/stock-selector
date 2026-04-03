@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "order_id": null,
+  "ticker": "AAPL",
+  "action": "BUY",
+  "quantity": 350,
+  "entry_price": 100.0,
+  "fill_price": null,
+  "status": "ERROR",
+  "pnl": null,
+  "reason": "ValueError: Insufficient funds. Required: USD 88,844, Available: USD 50,000",
+  "timestamp": "2026-04-01T08:09:09.585715+00:00"
+}

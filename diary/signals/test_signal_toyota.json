@@ -1,0 +1,12 @@
+{
+  "ticker": "7203.T",
+  "action": "BUY",
+  "entry_price": 3300,
+  "target_price": 3400,
+  "stop_loss_price": 3100,
+  "take_profit_price": 3400,
+  "confidence": 0.85,
+  "timespan": "swing",
+  "score": 60,
+  "reason": "テクニカル反発 + ファンダ良好"
+}

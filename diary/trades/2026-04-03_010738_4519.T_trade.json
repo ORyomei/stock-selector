@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "3b05c384-ef55-4b10-8a04-d72aa8d4fbde",
+  "ticker": "4519.T",
+  "action": "CLOSE",
+  "quantity": 196,
+  "entry_price": 9199.8396,
+  "fill_price": 8776.2444,
+  "status": "FILLED",
+  "pnl": -82680.56,
+  "reason": "Manual close: 196 shares",
+  "timestamp": "2026-04-03T01:07:38.906450+00:00"
+}

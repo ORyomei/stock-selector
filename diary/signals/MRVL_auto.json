@@ -1,0 +1,12 @@
+{
+  "ticker": "MRVL",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 118.09,
+  "stop_loss_price": 92.48,
+  "take_profit_price": 129.47,
+  "confidence": 0.8,
+  "timespan": "swing",
+  "score": 30,
+  "reason": "auto_trade[AI]: score=30, 買い"
+}

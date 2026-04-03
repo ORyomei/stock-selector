@@ -1,0 +1,18 @@
+[project]
+name = "stock-selector"
+version = "0.1.0"
+description = "株式売買判断アシスタント — スクリーニング・テクニカル分析・自動売買シミュレーション"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "yfinance>=0.2.36",
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "ta>=0.11.0",
+    "requests>=2.31",
+    "feedparser>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = []

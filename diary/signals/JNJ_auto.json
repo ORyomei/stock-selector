@@ -1,0 +1,12 @@
+{
+  "ticker": "JNJ",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 254.82,
+  "stop_loss_price": 237.23,
+  "take_profit_price": 262.63,
+  "confidence": 0.8,
+  "timespan": "swing",
+  "score": 25,
+  "reason": "auto_trade[AI]: score=25, 買い"
+}

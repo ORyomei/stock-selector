@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "be5308ce-acd0-4f60-a60f-0d704e5c2d3b",
+  "ticker": "PFE",
+  "action": "BUY",
+  "quantity": 359,
+  "entry_price": 29.5,
+  "fill_price": 28.275654457855225,
+  "status": "FILLED",
+  "pnl": -2.03,
+  "reason": "Order filled: 359 @ 28.275654457855225",
+  "timestamp": "2026-04-01T16:36:54.927131+00:00"
+}

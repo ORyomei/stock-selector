@@ -1,0 +1,12 @@
+{
+  "ticker": "7203.T",
+  "action": "buy",
+  "entry_price": 0,
+  "target_price": 3615,
+  "stop_loss_price": 3000,
+  "take_profit_price": 4020,
+  "confidence": 0.85,
+  "timespan": "swing",
+  "score": 60,
+  "reason": "スイング強気買い: 確率61%, テクニカル反発期待, アナリスト目標¥4,020, 配当3%"
+}

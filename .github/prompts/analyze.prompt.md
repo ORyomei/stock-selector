@@ -13,16 +13,16 @@ agent: "agent"
 2. 回答に応じて情報を収集する:
 
 ### 「🔍 自動発掘」が選ばれた場合
-   - `python scripts/screener.py --market all --strategy all --top 5` でスキャン
-   - ヒットした上位銘柄に対して `python scripts/scorer.py <ticker>` で詳細分析
+   - `python3 scripts/screener.py --market all --strategy all --top 5` でスキャン
+   - ヒットした上位銘柄に対して `python3 scripts/scorer.py <ticker>` で詳細分析
    - ニュース・センチメントも確認
 
 ### 特定の銘柄/戦略が選ばれた場合
-   - `python scripts/fetch_prices.py <ticker>` — 株価
-   - `python scripts/technical.py <ticker>` — テクニカル指標
-   - `python scripts/scorer.py <ticker>` — 総合スコアリング
-   - `python scripts/fetch_news.py <query>` — ニュース
-   - `python scripts/fetch_sentiment.py <query>` — センチメント
+   - `python3 scripts/fetch_prices.py <ticker>` — 株価
+   - `python3 scripts/technical.py <ticker>` — テクニカル指標
+   - `python3 scripts/scorer.py <ticker>` — 総合スコアリング
+   - `python3 scripts/fetch_news.py <query>` — ニュース
+   - `python3 scripts/fetch_sentiment.py <query>` — センチメント
 
 3. 結果を [copilot-instructions.md](../.github/copilot-instructions.md) の出力フォーマットに従って報告する
 
@@ -30,36 +30,45 @@ agent: "agent"
 
 ## 質問テンプレート
 
-`vscode_askQuestions` で以下の質問を表示すること:
+`vscode_askQuestions` を以下の引数で呼び出すこと:
 
-### 質問1: 分析モード
+```json
+{
+  "questions": [
+    {
+      "header": "モード",
+      "question": "どのように銘柄を探しますか？",
+      "options": [
+        { "label": "🔍 自動発掘（市場全体をスキャン）", "description": "米国+日本の約130銘柄をスキャンし有望銘柄を発見", "recommended": true },
+        { "label": "🔍 米国株だけスキャン", "description": "NASDAQ/NYSE の約90銘柄をスキャン" },
+        { "label": "🔍 日本株だけスキャン", "description": "東証の約40銘柄をスキャン" },
+        { "label": "📌 銘柄を指定する", "description": "特定のティッカーを入力して分析" }
+      ],
+      "allowFreeformInput": true
+    },
+    {
+      "header": "スパン",
+      "question": "どのタイムスパンで分析しますか？",
+      "options": [
+        { "label": "短期（1-5営業日）", "description": "デイトレ〜数日の短期売買" },
+        { "label": "スイング（1-3週間）", "description": "数日〜数週間のスイング", "recommended": true },
+        { "label": "中期（1-3ヶ月）", "description": "中長期で保有" },
+        { "label": "全スパン", "description": "すべてのスパンを網羅的に分析" }
+      ],
+      "allowFreeformInput": false
+    },
+    {
+      "header": "深さ",
+      "question": "分析の深さを選んでください",
+      "options": [
+        { "label": "クイック", "description": "最速。スコアと確率だけ確認したいとき" },
+        { "label": "標準", "description": "テクニカル＋ニュース＋スコア。通常はこれ", "recommended": true },
+        { "label": "詳細", "description": "全データ＋Web調査＋複数ソース。時間をかけて徹底分析" }
+      ],
+      "allowFreeformInput": false
+    }
+  ]
+}
+```
 
-- header: "モード"
-- question: "どのように銘柄を探しますか？"
-- options:
-  - "🔍 自動発掘（市場全体をスキャン）" — description: "米国+日本の約130銘柄をAIがスキャンし、有望銘柄を発見します", recommended
-  - "🔍 米国株だけスキャン" — description: "NASDAQ/NYSE の約90銘柄をスキャン"
-  - "🔍 日本株だけスキャン" — description: "東証の約40銘柄をスキャン"
-  - "📌 銘柄を指定する" — description: "特定のティッカーを入力して分析"
-- allowFreeformInput: true（ティッカーを直接入力可。例: AAPL, 7203.T）
-
-### 質問2: 売買スパン
-
-- header: "スパン"
-- question: "どのタイムスパンで分析しますか？"
-- options:
-  - "短期（1-5営業日）" — description: "デイトレ〜数日の短期売買"
-  - "スイング（1-3週間）" — description: "数日〜数週間のスイング", recommended
-  - "中期（1-3ヶ月）" — description: "中長期で保有"
-  - "全スパン" — description: "すべてのスパンを網羅的に分析"
-- allowFreeformInput: false
-
-### 質問3: 分析の深さ
-
-- header: "深さ"
-- question: "分析の深さを選んでください"
-- options:
-  - "クイック" — description: "最速。スコアと確率だけ確認したいとき"
-  - "標準" — description: "テクニカル＋ニュース＋スコア。通常はこれ", recommended
-  - "詳細" — description: "全データ＋Web調査＋複数ソース。時間をかけて徹底分析"
-- allowFreeformInput: false
+ティッカーが「モード」にフリーテキストで入力された場合（例: `AAPL`, `7203.T`）は、その銘柄を直接分析する。

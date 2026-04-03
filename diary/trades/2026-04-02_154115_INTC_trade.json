@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "3d0e842d-8411-4257-92bb-85d52b6394e1",
+  "ticker": "INTC",
+  "action": "CLOSE",
+  "quantity": 42,
+  "entry_price": 48.03960477905273,
+  "fill_price": 49.63007138977051,
+  "status": "FILLED",
+  "pnl": 67.22,
+  "reason": "Manual close: 42 shares",
+  "timestamp": "2026-04-02T15:41:15.626460+00:00"
+}

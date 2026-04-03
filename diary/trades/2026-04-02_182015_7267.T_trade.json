@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "a5b8e926-d90f-4986-9b0f-67804c791d9a",
+  "ticker": "7267.T",
+  "action": "CLOSE",
+  "quantity": 433,
+  "entry_price": 1273.2546,
+  "fill_price": 1272.7454,
+  "status": "FILLED",
+  "pnl": -110.24,
+  "reason": "Manual close: 433 shares",
+  "timestamp": "2026-04-02T18:20:15.544930+00:00"
+}

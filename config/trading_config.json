@@ -1,0 +1,14 @@
+{
+  "mode": "simulator",
+  "broker": "dmmfx",
+  "simulator": {
+    "initial_capital_jpy": 10000000,
+    "initial_capital_usd": 50000,
+    "spread_pct": 0.02
+  },
+  "live": {
+    "api_endpoint": "https://api.dmmfx.com/v1",
+    "api_key_env": "DMMFX_API_KEY",
+    "sandbox_mode": false
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "6a305946-6563-488e-9a56-685b5fde7e00",
+  "ticker": "AAPL",
+  "action": "BUY",
+  "quantity": 87,
+  "entry_price": 260,
+  "fill_price": 254.3072447113037,
+  "status": "FILLED",
+  "pnl": -4.42,
+  "reason": "Order filled: 87 @ 254.3072447113037",
+  "timestamp": "2026-04-01T16:16:48.025641+00:00"
+}

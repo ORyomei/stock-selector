@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "4df7605e-2e7b-4169-9a09-3b0e0958f657",
+  "ticker": "NFLX",
+  "action": "BUY",
+  "quantity": 17,
+  "entry_price": 104.38,
+  "fill_price": 98.6797356628418,
+  "status": "FILLED",
+  "pnl": -0.34,
+  "reason": "Order filled: 17 @ 98.6797356628418",
+  "timestamp": "2026-04-03T01:07:39.173619+00:00"
+}

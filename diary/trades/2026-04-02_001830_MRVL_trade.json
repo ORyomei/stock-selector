@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "order_id": "e6d1a8a2-b414-4264-aef6-5ab9ef170fa4",
+  "ticker": "MRVL",
+  "action": "BUY",
+  "quantity": 28,
+  "entry_price": 118.09,
+  "fill_price": 106.73134108428955,
+  "status": "FILLED",
+  "pnl": -0.6,
+  "reason": "Order filled: 28 @ 106.73134108428955",
+  "timestamp": "2026-04-02T00:18:29.691004+00:00"
+}

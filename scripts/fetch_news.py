@@ -10,18 +10,28 @@ import json
 import sys
 from urllib.parse import quote
 
+import time
 import feedparser
 
 
-def fetch_news(query: str, lang: str = "ja", limit: int = 10):
+def fetch_news(query: str, lang: str = "ja", limit: int = 10, retries: int = 2):
     encoded = quote(query)
     url = f"https://news.google.com/rss/search?q={encoded}&hl={lang}&gl=JP&ceid=JP:{lang}"
     if lang == "en":
         url = f"https://news.google.com/rss/search?q={encoded}&hl=en&gl=US&ceid=US:en"
 
-    feed = feedparser.parse(url)
+    feed = None
+    for attempt in range(retries + 1):
+        try:
+            feed = feedparser.parse(url)
+            if feed.entries:
+                break
+        except Exception as e:
+            print(f"WARN: RSS取得失敗 (attempt {attempt + 1}): {e}", file=sys.stderr)
+        if attempt < retries:
+            time.sleep(1.0 * (attempt + 1))
 
-    if not feed.entries:
+    if not feed or not feed.entries:
         print(f"ニュースが見つかりませんでした: {query}", file=sys.stderr)
         sys.exit(1)
 

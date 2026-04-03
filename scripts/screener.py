@@ -7,6 +7,7 @@ Usage:
   python scripts/screener.py --market jp         # 日本株のみ
   python scripts/screener.py --strategy oversold  # 売られすぎ銘柄のみ
   python scripts/screener.py --top 10            # 上位10銘柄を表示
+  python scripts/screener.py --universe expanded  # 拡張ユニバース
 
 戦略:
   oversold    — RSI低 + BB下限接近（逆張り買い候補）
@@ -19,6 +20,7 @@ import argparse
 import json
 import sys
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
@@ -62,101 +64,140 @@ JP_UNIVERSE = [
     "9613.T", "6326.T",
 ]
 
+# ---- 拡張ユニバース ----
+# S&P 500 の追加銘柄 (主要分以外)
+US_EXPANDED = [
+    # Additional S&P 500 components (Finance)
+    "WFC", "USB", "PNC", "TFC", "COF", "AIG", "MET", "PRU", "ALL", "CB",
+    # Healthcare expanded
+    "GILD", "REGN", "VRTX", "ISRG", "DXCM", "ZTS", "CI", "HUM", "ELV", "MCK",
+    # Consumer expanded
+    "PG", "KO", "PEP", "PM", "MO", "CL", "EL", "MDLZ", "KHC", "GIS",
+    # Tech expanded
+    "ADBE", "INTU", "NOW", "WDAY", "TEAM", "DOCU", "FTNT", "CDNS", "SNPS", "ANSS",
+    # Real Estate / Utilities
+    "AMT", "PLD", "CCI", "EQIX", "SPG", "NEE", "DUK", "SO", "AEP", "D",
+    # Industrials expanded
+    "WM", "RSG", "EMR", "ITW", "ROK", "SWK", "IR", "GD", "NOC", "TDG",
+    # Materials
+    "LIN", "APD", "ECL", "SHW", "NEM", "FCX", "GOLD", "NUE", "CLF", "STLD",
+]
 
-def analyze_single(ticker: str) -> dict | None:
-    """1銘柄のテクニカル指標を取得して辞書で返す。失敗時は None。"""
-    try:
-        t = yf.Ticker(ticker)
-        hist = t.history(period="6mo", interval="1d")
-        if hist.empty or len(hist) < 30:
-            return None
+# 日経225 追加銘柄
+JP_EXPANDED = [
+    "8316.T", "8411.T", "8604.T", "8766.T", "8725.T",  # 金融追加
+    "6301.T", "6305.T", "7012.T", "7013.T", "7201.T",  # 機械・自動車
+    "4901.T", "4911.T", "2801.T", "2269.T", "7269.T",  # 消費財
+    "3086.T", "8267.T", "3099.T", "9843.T", "2413.T",  # 小売・サービス
+    "9020.T", "9021.T", "9022.T", "9001.T", "9005.T",  # 運輸
+    "1925.T", "1928.T", "1878.T", "5108.T", "5802.T",  # 建設・素材
+    "4507.T", "4523.T", "4578.T", "2432.T", "4689.T",  # 製薬・IT
+]
 
-        info = t.info
-        close = hist["Close"]
-        high = hist["High"]
-        low = hist["Low"]
-        volume = hist["Volume"]
-        current = float(close.iloc[-1])
 
-        # RSI
-        rsi = float(ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1])
+def analyze_single(ticker: str, retries: int = 2) -> dict | None:
+    """1銘柄のテクニカル指標を取得して辞書で返す。失敗時はリトライ後 None。"""
+    for attempt in range(retries + 1):
+        try:
+            return _analyze_impl(ticker)
+        except Exception:
+            if attempt < retries:
+                time.sleep(0.5 * (attempt + 1))
+            continue
+    return None
 
-        # MACD
-        macd_ind = ta.trend.MACD(close)
-        macd_hist = float(macd_ind.macd_diff().iloc[-1])
-        macd_hist_prev = float(macd_ind.macd_diff().iloc[-2])
 
-        # ボリンジャーバンド
-        bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
-        bb_upper = float(bb.bollinger_hband().iloc[-1])
-        bb_lower = float(bb.bollinger_lband().iloc[-1])
-        bb_pct = (current - bb_lower) / (bb_upper - bb_lower) if (bb_upper - bb_lower) > 0 else 0.5
-
-        # 出来高
-        vol_sma_20 = float(volume.rolling(20).mean().iloc[-1])
-        vol_ratio = float(volume.iloc[-1]) / vol_sma_20 if vol_sma_20 > 0 else 1.0
-
-        # ATR
-        atr = float(ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range().iloc[-1])
-
-        # リターン
-        daily_returns = close.pct_change().dropna()
-        ret_1d = float(daily_returns.iloc[-1])
-        ret_5d = float(close.iloc[-1] / close.iloc[-6] - 1) if len(close) >= 6 else 0
-        ret_20d = float(close.iloc[-1] / close.iloc[-21] - 1) if len(close) >= 21 else 0
-
-        # ボラティリティ
-        vol_20d = float(daily_returns.tail(20).std())
-        ann_vol = vol_20d * math.sqrt(252)
-
-        # SMA
-        sma_5 = float(close.rolling(5).mean().iloc[-1])
-        sma_25 = float(close.rolling(25).mean().iloc[-1])
-        sma_75 = float(close.rolling(75).mean().iloc[-1]) if len(close) >= 75 else None
-
-        # 直近高値・安値
-        high_20d = float(high.tail(20).max())
-        low_20d = float(low.tail(20).min())
-        high_60d = float(high.tail(60).max()) if len(high) >= 60 else high_20d
-
-        # ファンダメンタル
-        pe = info.get("trailingPE")
-        pb = info.get("priceToBook")
-        div_yield = info.get("dividendYield")
-        market_cap = info.get("marketCap")
-
-        return {
-            "ticker": ticker,
-            "name": info.get("shortName", ticker),
-            "currency": info.get("currency", ""),
-            "current_price": round(current, 2),
-            "rsi": round(rsi, 2),
-            "macd_hist": round(macd_hist, 4),
-            "macd_hist_prev": round(macd_hist_prev, 4),
-            "macd_gc": macd_hist > 0 and macd_hist_prev <= 0,  # GC 発生
-            "macd_dc": macd_hist < 0 and macd_hist_prev >= 0,  # DC 発生
-            "bb_pct": round(bb_pct, 4),
-            "bb_lower": round(bb_lower, 2),
-            "bb_upper": round(bb_upper, 2),
-            "vol_ratio": round(vol_ratio, 2),
-            "atr": round(atr, 2),
-            "ret_1d": round(ret_1d * 100, 2),
-            "ret_5d": round(ret_5d * 100, 2),
-            "ret_20d": round(ret_20d * 100, 2),
-            "ann_vol": round(ann_vol * 100, 1),
-            "sma_5": round(sma_5, 2),
-            "sma_25": round(sma_25, 2),
-            "sma_75": round(sma_75, 2) if sma_75 else None,
-            "high_20d": round(high_20d, 2),
-            "low_20d": round(low_20d, 2),
-            "high_60d": round(high_60d, 2),
-            "pe": round(pe, 2) if pe else None,
-            "pb": round(pb, 2) if pb else None,
-            "div_yield": round(div_yield * 100, 2) if div_yield else None,
-            "market_cap": market_cap,
-        }
-    except Exception:
+def _analyze_impl(ticker: str) -> dict | None:
+    """analyze_single の実装本体"""
+    t = yf.Ticker(ticker)
+    hist = t.history(period="6mo", interval="1d")
+    if hist.empty or len(hist) < 30:
         return None
+
+    info = t.info
+    close = hist["Close"]
+    high = hist["High"]
+    low = hist["Low"]
+    volume = hist["Volume"]
+    current = float(close.iloc[-1])
+
+    # RSI
+    rsi = float(ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1])
+
+    # MACD
+    macd_ind = ta.trend.MACD(close)
+    macd_hist = float(macd_ind.macd_diff().iloc[-1])
+    macd_hist_prev = float(macd_ind.macd_diff().iloc[-2])
+
+    # ボリンジャーバンド
+    bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
+    bb_upper = float(bb.bollinger_hband().iloc[-1])
+    bb_lower = float(bb.bollinger_lband().iloc[-1])
+    bb_pct = (current - bb_lower) / (bb_upper - bb_lower) if (bb_upper - bb_lower) > 0 else 0.5
+
+    # 出来高
+    vol_sma_20 = float(volume.rolling(20).mean().iloc[-1])
+    vol_ratio = float(volume.iloc[-1]) / vol_sma_20 if vol_sma_20 > 0 else 1.0
+
+    # ATR
+    atr = float(ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range().iloc[-1])
+
+    # リターン
+    daily_returns = close.pct_change().dropna()
+    ret_1d = float(daily_returns.iloc[-1])
+    ret_5d = float(close.iloc[-1] / close.iloc[-6] - 1) if len(close) >= 6 else 0
+    ret_20d = float(close.iloc[-1] / close.iloc[-21] - 1) if len(close) >= 21 else 0
+
+    # ボラティリティ
+    vol_20d = float(daily_returns.tail(20).std())
+    ann_vol = vol_20d * math.sqrt(252)
+
+    # SMA
+    sma_5 = float(close.rolling(5).mean().iloc[-1])
+    sma_25 = float(close.rolling(25).mean().iloc[-1])
+    sma_75 = float(close.rolling(75).mean().iloc[-1]) if len(close) >= 75 else None
+
+    # 直近高値・安値
+    high_20d = float(high.tail(20).max())
+    low_20d = float(low.tail(20).min())
+    high_60d = float(high.tail(60).max()) if len(high) >= 60 else high_20d
+
+    # ファンダメンタル
+    pe = info.get("trailingPE")
+    pb = info.get("priceToBook")
+    div_yield = info.get("dividendYield")
+    market_cap = info.get("marketCap")
+
+    return {
+        "ticker": ticker,
+        "name": info.get("shortName", ticker),
+        "currency": info.get("currency", ""),
+        "current_price": round(current, 2),
+        "rsi": round(rsi, 2),
+        "macd_hist": round(macd_hist, 4),
+        "macd_hist_prev": round(macd_hist_prev, 4),
+        "macd_gc": macd_hist > 0 and macd_hist_prev <= 0,
+        "macd_dc": macd_hist < 0 and macd_hist_prev >= 0,
+        "bb_pct": round(bb_pct, 4),
+        "bb_lower": round(bb_lower, 2),
+        "bb_upper": round(bb_upper, 2),
+        "vol_ratio": round(vol_ratio, 2),
+        "atr": round(atr, 2),
+        "ret_1d": round(ret_1d * 100, 2),
+        "ret_5d": round(ret_5d * 100, 2),
+        "ret_20d": round(ret_20d * 100, 2),
+        "ann_vol": round(ann_vol * 100, 1),
+        "sma_5": round(sma_5, 2),
+        "sma_25": round(sma_25, 2),
+        "sma_75": round(sma_75, 2) if sma_75 else None,
+        "high_20d": round(high_20d, 2),
+        "low_20d": round(low_20d, 2),
+        "high_60d": round(high_60d, 2),
+        "pe": round(pe, 2) if pe else None,
+        "pb": round(pb, 2) if pb else None,
+        "div_yield": round(div_yield * 100, 2) if div_yield else None,
+        "market_cap": market_cap,
+    }
 
 
 def screen_oversold(data: list[dict]) -> list[dict]:
@@ -355,14 +396,22 @@ def main():
     parser.add_argument("--strategy", choices=["oversold", "momentum", "breakout", "value", "all"],
                         default="all", help="スクリーニング戦略")
     parser.add_argument("--top", type=int, default=5, help="各戦略の上位N件を表示")
+    parser.add_argument("--universe", choices=["default", "expanded"], default="default",
+                        help="ユニバースサイズ (expanded: S&P500+日経225全銘柄)")
     args = parser.parse_args()
 
     # ユニバース選択
     universe = []
     if args.market in ("us", "all"):
         universe += US_UNIVERSE
+        if args.universe == "expanded":
+            universe += US_EXPANDED
     if args.market in ("jp", "all"):
         universe += JP_UNIVERSE
+        if args.universe == "expanded":
+            universe += JP_EXPANDED
+    # 重複除去
+    universe = list(dict.fromkeys(universe))
 
     print(f"スキャン中... {len(universe)} 銘柄を分析しています", file=sys.stderr)
 

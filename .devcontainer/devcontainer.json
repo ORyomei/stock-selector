@@ -1,11 +1,13 @@
 {
   "name": "stock-selector",
   "build": {
-    "dockerfile": "Dockerfile"
+    "dockerfile": "Dockerfile",
+    "context": ".."
   },
   "runArgs": ["--name", "stock-selector"],
   "updateRemoteUserUID": true,
   "remoteUser": "ubuntu",
+  "postCreateCommand": "ln -sfn /home/ubuntu/.stock-venv /workspaces/stock-selector/.venv && mkdir -p /workspaces/stock-selector/data && cd /workspaces/stock-selector && uv sync",
   "customizations": {
     "vscode": {
       "settings": {
@@ -18,7 +20,9 @@
           "/^git\\s+send-pack\\b/": false,
           "/^gh\\s+pr\\s+create\\b/": false,
           "/.*/": true
-        }
+        },
+        "chat.tools.autoApprove": true,
+        "github.copilot.chat.agent.autoApprove": true
       }
     }
   }
