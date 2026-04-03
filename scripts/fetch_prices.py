@@ -8,6 +8,8 @@ Usage: python scripts/fetch_prices.py <ticker> [--period 3mo] [--interval 1d]
   python scripts/fetch_prices.py AAPL --period 1mo --interval 1h
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys

@@ -6,6 +6,8 @@ Usage: python scripts/fundamentals.py <ticker>
 yfinance から決算データ・財務諸表を取得し、成長性・収益性・財務健全性を評価する。
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 

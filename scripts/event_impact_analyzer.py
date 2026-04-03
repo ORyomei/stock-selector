@@ -11,10 +11,13 @@ Usage:
   python3 scripts/event_impact_analyzer.py --lang en               # 英語ニュースのみ
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 import time
+from typing import Any
 from urllib.parse import quote
 
 import feedparser
@@ -406,7 +409,7 @@ def classify_article(title: str) -> list[str]:
     return matched
 
 
-def analyze_impacts(articles: list[dict]) -> dict:
+def analyze_impacts(articles: list[dict]) -> dict[str, Any]:
     """
     記事リストから因果影響をまとめて返す。
 
@@ -600,7 +603,7 @@ def format_causal_summary(result: dict) -> str:
     return "\n".join(lines)
 
 
-def run(query: str | None = None, lang: str | None = None, limit: int = 8) -> dict:
+def run(query: str | None = None, lang: str | None = None, limit: int = 8) -> dict[str, Any]:
     """
     メイン処理。ニュースを取得して因果分析を返す。
 

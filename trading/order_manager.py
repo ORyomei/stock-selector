@@ -3,9 +3,12 @@
 売買判断（TradingSignal）を Order オブジェクトに変換する。
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from .broker_interface import Order, OrderSide, OrderType
 
@@ -84,7 +87,7 @@ class TradingSignal:
 
         return True
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """JSON シリアライズ用"""
         return {
             "ticker": self.ticker,

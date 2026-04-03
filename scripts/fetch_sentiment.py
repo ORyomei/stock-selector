@@ -7,10 +7,13 @@ Usage: python scripts/fetch_sentiment.py <query> [--limit 20]
 Google News の日本語・英語両方のヘッドラインを統合して分析。
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import re
 import sys
+from typing import Any
 from urllib.parse import quote
 
 import feedparser
@@ -170,7 +173,7 @@ def _score_text(text: str) -> tuple[float, str]:
     return round(score, 3), label
 
 
-def analyze_sentiment(texts: list[str]) -> dict:
+def analyze_sentiment(texts: list[str]) -> dict[str, Any]:
     """重み付きセンチメント分析"""
     positive = 0
     negative = 0

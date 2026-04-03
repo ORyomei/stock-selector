@@ -3,6 +3,8 @@
 ポジションサイズ計算、損切り/利確判定、レバレッジ制御等を担当。
 """
 
+from __future__ import annotations
+
 from datetime import UTC
 
 from .broker_interface import Position

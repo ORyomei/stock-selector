@@ -11,6 +11,8 @@ SQLite の analyses テーブルから過去の推奨を取得し、
 実際のその後の値動きと比較して的中率・リターンを算出する。
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sqlite3

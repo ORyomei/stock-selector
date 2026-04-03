@@ -3,7 +3,10 @@
 売買判断 → 注文 → 発注 → 約定確認を統合管理する。
 """
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
+from typing import Any
 
 from .broker_interface import BrokerInterface
 from .order_manager import OrderManager, TradeAction, TradingSignal
@@ -30,7 +33,7 @@ class TradeExecutor:
         self.order_manager = order_manager
         self.risk_manager = risk_manager
 
-    def execute_signal(self, signal: TradingSignal) -> dict:
+    def execute_signal(self, signal: TradingSignal) -> dict[str, Any]:
         """売買判断シグナルを実行する
 
         メイン処理。判断 → 注文生成 → 発注 → 約定確認を行う。
@@ -211,7 +214,7 @@ class TradeExecutor:
             return "take_profit"
         return "trailing_stop"
 
-    def get_portfolio_summary(self) -> dict:
+    def get_portfolio_summary(self) -> dict[str, Any]:
         """ポートフォリオの概要を取得
 
         Returns:

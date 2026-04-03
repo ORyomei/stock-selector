@@ -6,6 +6,8 @@ Usage: python scripts/fetch_news.py <query> [--lang ja] [--limit 10]
 Google News RSS を使ってニュースを取得する。
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys

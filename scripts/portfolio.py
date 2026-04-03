@@ -10,18 +10,21 @@ Usage:
 仮想ポートフォリオで売買をシミュレーションし、損益を追跡する。
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import yfinance as yf
 
 PORTFOLIO_PATH = Path(__file__).parent.parent / "portfolio.json"
 
 
-def load_portfolio() -> dict:
+def load_portfolio() -> dict[str, Any]:
     if PORTFOLIO_PATH.exists():
         with open(PORTFOLIO_PATH) as f:
             return json.load(f)

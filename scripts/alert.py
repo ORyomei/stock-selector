@@ -10,10 +10,13 @@ Usage:
 価格急変・損切りライン到達・テクニカルシグナル発生を検知する。
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import ta
 import yfinance as yf
@@ -32,7 +35,7 @@ def load_watchlist() -> list[dict]:
     return data.get("watchlist", [])
 
 
-def load_portfolio() -> dict:
+def load_portfolio() -> dict[str, Any]:
     """ポートフォリオ読み込み"""
     if not PORTFOLIO_PATH.exists():
         return {"holdings": []}

@@ -17,12 +17,15 @@ Usage:
   all         — 上記すべてを実行（デフォルト）
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import math
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 import ta
 import yfinance as yf
@@ -564,7 +567,7 @@ def screen_value(data: list[dict]) -> list[dict]:
     return sorted(results, key=lambda x: x["score"], reverse=True)
 
 
-def format_result(item: dict) -> dict:
+def format_result(item: dict) -> dict[str, Any]:
     """出力用に整形"""
     return {
         "ticker": item["ticker"],

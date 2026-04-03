@@ -4,10 +4,13 @@ Order、Position、BrokerInterface を定義し、
 シミュレーターと実取引 API を差し替え可能にする。
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 
 class OrderSide(StrEnum):
@@ -68,7 +71,7 @@ class Order:
     stop_loss: float | None = None
     take_profit: float | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """JSON シリアライズ用"""
         return {
             "id": self.id,
@@ -122,7 +125,7 @@ class Position:
             else 0.0
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """JSON シリアライズ用"""
         return {
             "ticker": self.ticker,
@@ -144,7 +147,7 @@ class BrokerInterface(ABC):
     """
 
     @abstractmethod
-    def get_balance(self) -> dict:
+    def get_balance(self) -> dict[str, Any]:
         """残高取得
 
         Returns:

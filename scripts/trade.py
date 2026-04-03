@@ -14,12 +14,15 @@ Usage:
   - JSON 出力（Copilot Chat 向け）
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import math
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 # 親ディレクトリから import
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -41,7 +44,7 @@ TRADES_DIR = DIARY_DIR / "trades"
 PORTFOLIO_FILE = PROJECT_DIR / "portfolio.json"
 
 
-def load_config() -> dict:
+def load_config() -> dict[str, Any]:
     """設定ファイルを読み込む"""
     config_path = CONFIG_DIR / "trading_config.json"
     if not config_path.exists():
@@ -52,7 +55,7 @@ def load_config() -> dict:
         return json.load(f)
 
 
-def load_risk_limits() -> dict:
+def load_risk_limits() -> dict[str, Any]:
     """リスク管理設定を読み込む"""
     limits_path = CONFIG_DIR / "risk_limits.json"
     if not limits_path.exists():

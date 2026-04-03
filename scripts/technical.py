@@ -6,6 +6,8 @@ Usage: python scripts/technical.py <ticker> [--period 6mo]
 RSI, MACD, ボリンジャーバンド, SMA/EMA 等を計算して出力する。
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys

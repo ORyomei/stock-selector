@@ -7,6 +7,8 @@ Usage: python scripts/scorer.py <ticker> [--period 6mo]
 具体的なタイムスパン・目標価格・確率を出力する。
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import math
