@@ -5,13 +5,13 @@ Usage: python scripts/technical.py <ticker> [--period 6mo]
 
 RSI, MACD, ボリンジャーバンド, SMA/EMA 等を計算して出力する。
 """
+
 import argparse
 import json
 import sys
 
-import yfinance as yf
 import ta
-import pandas as pd
+import yfinance as yf
 
 
 def analyze(ticker: str, period: str = "6mo"):
@@ -23,9 +23,9 @@ def analyze(ticker: str, period: str = "6mo"):
         sys.exit(1)
 
     close = hist["Close"]
-    high = hist["High"]
-    low = hist["Low"]
-    volume = hist["Volume"]
+    hist["High"]
+    hist["Low"]
+    hist["Volume"]
 
     # RSI (14日)
     rsi_indicator = ta.momentum.RSIIndicator(close, window=14)

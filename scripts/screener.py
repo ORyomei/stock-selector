@@ -16,82 +16,281 @@ Usage:
   value       — PER/PBR割安 + 配当利回り高
   all         — 上記すべてを実行（デフォルト）
 """
+
 import argparse
 import json
-import sys
 import math
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import numpy as np
-import yfinance as yf
 import ta
-import pandas as pd
-
+import yfinance as yf
 
 # ---- スキャン対象ユニバース ----
 # 主要指数の構成銘柄（代表的なもの）
 
 US_UNIVERSE = [
     # Mega Cap Tech
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AVGO", "ORCL", "CRM",
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "NVDA",
+    "META",
+    "TSLA",
+    "AVGO",
+    "ORCL",
+    "CRM",
     # Semiconductors
-    "AMD", "INTC", "QCOM", "TXN", "MU", "MRVL", "KLAC", "LRCX", "AMAT", "ON",
+    "AMD",
+    "INTC",
+    "QCOM",
+    "TXN",
+    "MU",
+    "MRVL",
+    "KLAC",
+    "LRCX",
+    "AMAT",
+    "ON",
     # AI / Cloud
-    "PLTR", "SNOW", "NET", "DDOG", "ZS", "CRWD", "MDB", "PANW",
+    "PLTR",
+    "SNOW",
+    "NET",
+    "DDOG",
+    "ZS",
+    "CRWD",
+    "MDB",
+    "PANW",
     # Finance
-    "JPM", "BAC", "GS", "MS", "V", "MA", "AXP", "BLK", "SCHW", "C",
+    "JPM",
+    "BAC",
+    "GS",
+    "MS",
+    "V",
+    "MA",
+    "AXP",
+    "BLK",
+    "SCHW",
+    "C",
     # Healthcare
-    "UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "BMY", "AMGN",
+    "UNH",
+    "JNJ",
+    "LLY",
+    "PFE",
+    "ABBV",
+    "MRK",
+    "TMO",
+    "ABT",
+    "BMY",
+    "AMGN",
     # Consumer
-    "WMT", "COST", "HD", "MCD", "NKE", "SBUX", "TGT", "LOW", "DIS", "NFLX",
+    "WMT",
+    "COST",
+    "HD",
+    "MCD",
+    "NKE",
+    "SBUX",
+    "TGT",
+    "LOW",
+    "DIS",
+    "NFLX",
     # Energy
-    "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HAL",
+    "XOM",
+    "CVX",
+    "COP",
+    "SLB",
+    "EOG",
+    "MPC",
+    "PSX",
+    "VLO",
+    "OXY",
+    "HAL",
     # Industrial
-    "CAT", "DE", "BA", "GE", "HON", "UPS", "RTX", "LMT", "MMM", "FDX",
+    "CAT",
+    "DE",
+    "BA",
+    "GE",
+    "HON",
+    "UPS",
+    "RTX",
+    "LMT",
+    "MMM",
+    "FDX",
     # Other
-    "BRK-B", "COIN", "SQ", "SHOP", "UBER", "ABNB", "RIVN", "LCID",
+    "BRK-B",
+    "COIN",
+    "SQ",
+    "SHOP",
+    "UBER",
+    "ABNB",
+    "RIVN",
+    "LCID",
 ]
 
 JP_UNIVERSE = [
     # 日経225 主要銘柄
-    "7203.T", "6758.T", "9984.T", "8306.T", "6861.T", "9432.T", "9433.T",
-    "7267.T", "6501.T", "6902.T", "4063.T", "8035.T", "6367.T", "7974.T",
-    "4502.T", "4503.T", "4568.T", "6098.T", "3382.T", "9983.T",
-    "2802.T", "7751.T", "6954.T", "8001.T", "8058.T", "8031.T",
-    "5401.T", "3407.T", "6503.T", "7011.T", "2914.T", "4661.T",
-    "6273.T", "7741.T", "6857.T", "6971.T", "4519.T", "6702.T",
-    "9613.T", "6326.T",
+    "7203.T",
+    "6758.T",
+    "9984.T",
+    "8306.T",
+    "6861.T",
+    "9432.T",
+    "9433.T",
+    "7267.T",
+    "6501.T",
+    "6902.T",
+    "4063.T",
+    "8035.T",
+    "6367.T",
+    "7974.T",
+    "4502.T",
+    "4503.T",
+    "4568.T",
+    "6098.T",
+    "3382.T",
+    "9983.T",
+    "2802.T",
+    "7751.T",
+    "6954.T",
+    "8001.T",
+    "8058.T",
+    "8031.T",
+    "5401.T",
+    "3407.T",
+    "6503.T",
+    "7011.T",
+    "2914.T",
+    "4661.T",
+    "6273.T",
+    "7741.T",
+    "6857.T",
+    "6971.T",
+    "4519.T",
+    "6702.T",
+    "9613.T",
+    "6326.T",
 ]
 
 # ---- 拡張ユニバース ----
 # S&P 500 の追加銘柄 (主要分以外)
 US_EXPANDED = [
     # Additional S&P 500 components (Finance)
-    "WFC", "USB", "PNC", "TFC", "COF", "AIG", "MET", "PRU", "ALL", "CB",
+    "WFC",
+    "USB",
+    "PNC",
+    "TFC",
+    "COF",
+    "AIG",
+    "MET",
+    "PRU",
+    "ALL",
+    "CB",
     # Healthcare expanded
-    "GILD", "REGN", "VRTX", "ISRG", "DXCM", "ZTS", "CI", "HUM", "ELV", "MCK",
+    "GILD",
+    "REGN",
+    "VRTX",
+    "ISRG",
+    "DXCM",
+    "ZTS",
+    "CI",
+    "HUM",
+    "ELV",
+    "MCK",
     # Consumer expanded
-    "PG", "KO", "PEP", "PM", "MO", "CL", "EL", "MDLZ", "KHC", "GIS",
+    "PG",
+    "KO",
+    "PEP",
+    "PM",
+    "MO",
+    "CL",
+    "EL",
+    "MDLZ",
+    "KHC",
+    "GIS",
     # Tech expanded
-    "ADBE", "INTU", "NOW", "WDAY", "TEAM", "DOCU", "FTNT", "CDNS", "SNPS", "ANSS",
+    "ADBE",
+    "INTU",
+    "NOW",
+    "WDAY",
+    "TEAM",
+    "DOCU",
+    "FTNT",
+    "CDNS",
+    "SNPS",
+    "ANSS",
     # Real Estate / Utilities
-    "AMT", "PLD", "CCI", "EQIX", "SPG", "NEE", "DUK", "SO", "AEP", "D",
+    "AMT",
+    "PLD",
+    "CCI",
+    "EQIX",
+    "SPG",
+    "NEE",
+    "DUK",
+    "SO",
+    "AEP",
+    "D",
     # Industrials expanded
-    "WM", "RSG", "EMR", "ITW", "ROK", "SWK", "IR", "GD", "NOC", "TDG",
+    "WM",
+    "RSG",
+    "EMR",
+    "ITW",
+    "ROK",
+    "SWK",
+    "IR",
+    "GD",
+    "NOC",
+    "TDG",
     # Materials
-    "LIN", "APD", "ECL", "SHW", "NEM", "FCX", "GOLD", "NUE", "CLF", "STLD",
+    "LIN",
+    "APD",
+    "ECL",
+    "SHW",
+    "NEM",
+    "FCX",
+    "GOLD",
+    "NUE",
+    "CLF",
+    "STLD",
 ]
 
 # 日経225 追加銘柄
 JP_EXPANDED = [
-    "8316.T", "8411.T", "8604.T", "8766.T", "8725.T",  # 金融追加
-    "6301.T", "6305.T", "7012.T", "7013.T", "7201.T",  # 機械・自動車
-    "4901.T", "4911.T", "2801.T", "2269.T", "7269.T",  # 消費財
-    "3086.T", "8267.T", "3099.T", "9843.T", "2413.T",  # 小売・サービス
-    "9020.T", "9021.T", "9022.T", "9001.T", "9005.T",  # 運輸
-    "1925.T", "1928.T", "1878.T", "5108.T", "5802.T",  # 建設・素材
-    "4507.T", "4523.T", "4578.T", "2432.T", "4689.T",  # 製薬・IT
+    "8316.T",
+    "8411.T",
+    "8604.T",
+    "8766.T",
+    "8725.T",  # 金融追加
+    "6301.T",
+    "6305.T",
+    "7012.T",
+    "7013.T",
+    "7201.T",  # 機械・自動車
+    "4901.T",
+    "4911.T",
+    "2801.T",
+    "2269.T",
+    "7269.T",  # 消費財
+    "3086.T",
+    "8267.T",
+    "3099.T",
+    "9843.T",
+    "2413.T",  # 小売・サービス
+    "9020.T",
+    "9021.T",
+    "9022.T",
+    "9001.T",
+    "9005.T",  # 運輸
+    "1925.T",
+    "1928.T",
+    "1878.T",
+    "5108.T",
+    "5802.T",  # 建設・素材
+    "4507.T",
+    "4523.T",
+    "4578.T",
+    "2432.T",
+    "4689.T",  # 製薬・IT
 ]
 
 
@@ -140,7 +339,9 @@ def _analyze_impl(ticker: str) -> dict | None:
     vol_ratio = float(volume.iloc[-1]) / vol_sma_20 if vol_sma_20 > 0 else 1.0
 
     # ATR
-    atr = float(ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range().iloc[-1])
+    atr = float(
+        ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range().iloc[-1]
+    )
 
     # リターン
     daily_returns = close.pct_change().dropna()
@@ -391,13 +592,22 @@ def format_result(item: dict) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="株式スクリーナー")
-    parser.add_argument("--market", choices=["us", "jp", "all"], default="all",
-                        help="スキャン対象市場")
-    parser.add_argument("--strategy", choices=["oversold", "momentum", "breakout", "value", "all"],
-                        default="all", help="スクリーニング戦略")
+    parser.add_argument(
+        "--market", choices=["us", "jp", "all"], default="all", help="スキャン対象市場"
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=["oversold", "momentum", "breakout", "value", "all"],
+        default="all",
+        help="スクリーニング戦略",
+    )
     parser.add_argument("--top", type=int, default=5, help="各戦略の上位N件を表示")
-    parser.add_argument("--universe", choices=["default", "expanded"], default="default",
-                        help="ユニバースサイズ (expanded: S&P500+日経225全銘柄)")
+    parser.add_argument(
+        "--universe",
+        choices=["default", "expanded"],
+        default="default",
+        help="ユニバースサイズ (expanded: S&P500+日経225全銘柄)",
+    )
     args = parser.parse_args()
 
     # ユニバース選択
@@ -419,9 +629,7 @@ def main():
     results = []
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(analyze_single, t): t for t in universe}
-        done = 0
-        for future in as_completed(futures):
-            done += 1
+        for done, future in enumerate(as_completed(futures), 1):
             if done % 20 == 0:
                 print(f"  進捗: {done}/{len(universe)}", file=sys.stderr)
             result = future.result()
@@ -442,10 +650,10 @@ def main():
     if args.strategy == "all":
         for name, func in strategies.items():
             hits = func(results)
-            output[name] = [format_result(h) for h in hits[:args.top]]
+            output[name] = [format_result(h) for h in hits[: args.top]]
     else:
         hits = strategies[args.strategy](results)
-        output[args.strategy] = [format_result(h) for h in hits[:args.top]]
+        output[args.strategy] = [format_result(h) for h in hits[: args.top]]
 
     # サマリー
     total_hits = sum(len(v) for v in output.values())

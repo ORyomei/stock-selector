@@ -3,12 +3,10 @@
 売買判断 → 注文 → 発注 → 約定確認を統合管理する。
 """
 
-import json
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from .broker_interface import BrokerInterface, OrderSide
-from .order_manager import OrderManager, TradingSignal, TradeAction
+from .broker_interface import BrokerInterface
+from .order_manager import OrderManager, TradeAction, TradingSignal
 from .risk_manager import RiskManager
 
 
@@ -66,7 +64,7 @@ class TradeExecutor:
             "status": "ERROR",
             "pnl": None,
             "reason": "",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         try:
@@ -80,9 +78,7 @@ class TradeExecutor:
             current_balance = self.broker.get_balance()
 
             # 3. リスクチェック
-            is_valid, error_msg = self.risk_manager.validate_order(
-                signal.ticker, current_positions
-            )
+            is_valid, error_msg = self.risk_manager.validate_order(signal.ticker, current_positions)
             if not is_valid:
                 result["reason"] = f"Risk check failed: {error_msg}"
                 return result
@@ -94,7 +90,9 @@ class TradeExecutor:
                 return result
 
             result["quantity"] = order.quantity
-            result["entry_price"] = order.entry_price if order.entry_price > 0 else signal.target_price
+            result["entry_price"] = (
+                order.entry_price if order.entry_price > 0 else signal.target_price
+            )
 
             # 5. 注文発注
             placed_order = self.broker.place_order(
@@ -114,14 +112,14 @@ class TradeExecutor:
             # 6. 約定確認と損益計算
             if placed_order.status.value == "FILLED":
                 result["success"] = True
-                
+
                 # ポジション更新後の損益
                 updated_positions = self.broker.get_positions()
                 for pos in updated_positions:
                     if pos.ticker == signal.ticker:
                         result["pnl"] = round(pos.pnl, 2)
                         break
-                
+
                 result["reason"] = f"Order filled: {order.quantity} @ {placed_order.fill_price}"
             else:
                 result["reason"] = f"Order status: {placed_order.status.value}"
@@ -163,7 +161,6 @@ class TradeExecutor:
                 )
 
                 if should_close:
-
                     signal = TradingSignal(
                         ticker=position.ticker,
                         action=TradeAction.CLOSE,
@@ -178,26 +175,30 @@ class TradeExecutor:
                     result = self.execute_signal(signal)
 
                     # 結果をまとめる
-                    results.append({
-                        "success": result["success"],
-                        "ticker": result["ticker"],
-                        "quantity": result["quantity"],
-                        "reason": reason,
-                        "timestamp": result["timestamp"],
-                        "fill_price": result["fill_price"],
-                        "pnl": result["pnl"],
-                    })
+                    results.append(
+                        {
+                            "success": result["success"],
+                            "ticker": result["ticker"],
+                            "quantity": result["quantity"],
+                            "reason": reason,
+                            "timestamp": result["timestamp"],
+                            "fill_price": result["fill_price"],
+                            "pnl": result["pnl"],
+                        }
+                    )
 
         except Exception as e:
-            results.append({
-                "success": False,
-                "ticker": "N/A",
-                "quantity": 0,
-                "reason": f"Error in check_and_close: {str(e)}",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "fill_price": None,
-                "pnl": None,
-            })
+            results.append(
+                {
+                    "success": False,
+                    "ticker": "N/A",
+                    "quantity": 0,
+                    "reason": f"Error in check_and_close: {str(e)}",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "fill_price": None,
+                    "pnl": None,
+                }
+            )
 
         return results
 
@@ -237,5 +238,5 @@ class TradeExecutor:
             "positions": [pos.to_dict() for pos in positions],
             "total_pnl": round(total_pnl, 2),
             "total_pnl_pct": round(total_pnl_pct, 2),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }

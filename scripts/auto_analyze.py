@@ -19,12 +19,13 @@ AI設定:
 """
 
 import argparse
+import contextlib
 import json
+import os
 import subprocess
 import sys
-import os
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
@@ -63,7 +64,9 @@ def run_script(script_name, args=None, timeout=120):
     if args:
         cmd.extend(args)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(PROJECT_DIR))
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, cwd=str(PROJECT_DIR)
+        )
         if result.returncode != 0:
             print(f"  warn: {script_name} error: {result.stderr[:200]}", file=sys.stderr)
             return None
@@ -87,20 +90,23 @@ def get_top_tickers(screener_result, max_tickers=5):
             ticker = c["ticker"]
             if ticker not in seen:
                 seen.add(ticker)
-                top.append({
-                    "ticker": ticker,
-                    "name": c.get("name", ""),
-                    "strategy": strategy,
-                    "screener_score": c.get("score", 0),
-                    "current_price": c.get("current_price"),
-                    "currency": c.get("currency", ""),
-                    "reasons": c.get("reasons", []),
-                })
+                top.append(
+                    {
+                        "ticker": ticker,
+                        "name": c.get("name", ""),
+                        "strategy": strategy,
+                        "screener_score": c.get("score", 0),
+                        "current_price": c.get("current_price"),
+                        "currency": c.get("currency", ""),
+                        "reasons": c.get("reasons", []),
+                    }
+                )
     top.sort(key=lambda x: x["screener_score"], reverse=True)
     return top[:max_tickers]
 
 
 # ─── AI ────────────────────────────────────────────────────
+
 
 def get_ai_token(provider):
     """AIプロバイダーのトークンを取得"""
@@ -114,7 +120,9 @@ def get_ai_token(provider):
         return None
     if provider == "github":
         try:
-            result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=10)
+            result = subprocess.run(
+                ["gh", "auth", "token"], capture_output=True, text=True, timeout=10
+            )
             if result.returncode == 0:
                 return result.stdout.strip()
         except Exception:
@@ -126,7 +134,12 @@ def get_ai_token(provider):
 def build_ai_prompt(collected_data, market, span, depth):
     """AI分析用プロンプトを構築"""
     labels_market = {"us": "米国株", "jp": "日本株", "all": "全市場"}
-    labels_span = {"short": "短期(1-5日)", "swing": "スイング(1-3週間)", "medium": "中期(1-3ヶ月)", "all": "全スパン"}
+    labels_span = {
+        "short": "短期(1-5日)",
+        "swing": "スイング(1-3週間)",
+        "medium": "中期(1-3ヶ月)",
+        "all": "全スパン",
+    }
 
     data_json = json.dumps(collected_data, ensure_ascii=False, indent=2, default=str)
     if len(data_json) > 20000:
@@ -200,14 +213,16 @@ Markdown形式で出力してください。"""
 
 def call_copilot(prompt):
     """gh copilot -p を使って分析結果を取得（ツール無効・silent モード）"""
-    import tempfile
     import shlex
+    import tempfile
 
     print("  AI: gh copilot (Copilot Premium) に分析を依頼中...")
 
     prompt_file = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             f.write(prompt)
             prompt_file = f.name
 
@@ -215,18 +230,23 @@ def call_copilot(prompt):
         copilot_flags = '--excluded-tools="shell,read,write,list,search,glob,stat,create,edit" --no-custom-instructions -s'
 
         if len(prompt) < 10000:
-            cmd = f'gh copilot -- -p {shlex.quote(prompt)} {copilot_flags}'
+            cmd = f"gh copilot -- -p {shlex.quote(prompt)} {copilot_flags}"
         else:
-            cmd = f'cat {shlex.quote(prompt_file)} | gh copilot -- -p - {copilot_flags}'
+            cmd = f"cat {shlex.quote(prompt_file)} | gh copilot -- -p - {copilot_flags}"
 
         result = subprocess.run(
             ["bash", "-c", cmd],
-            capture_output=True, text=True,
-            timeout=600, cwd=str(PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=600,
+            cwd=str(PROJECT_DIR),
         )
 
         if result.returncode != 0:
-            print(f"  warn: gh copilot error (rc={result.returncode}): {result.stderr[:300]}", file=sys.stderr)
+            print(
+                f"  warn: gh copilot error (rc={result.returncode}): {result.stderr[:300]}",
+                file=sys.stderr,
+            )
             return None
 
         output = result.stdout.strip()
@@ -243,10 +263,8 @@ def call_copilot(prompt):
         return None
     finally:
         if prompt_file:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(prompt_file)
-            except OSError:
-                pass
 
 
 def call_ai_api(prompt, provider, model):
@@ -289,7 +307,10 @@ def call_ai_api(prompt, provider, model):
                 timeout=180,
             )
             if response.status_code != 200:
-                print(f"  warn: Anthropic API error {response.status_code}: {response.text[:300]}", file=sys.stderr)
+                print(
+                    f"  warn: Anthropic API error {response.status_code}: {response.text[:300]}",
+                    file=sys.stderr,
+                )
                 return None
             result = response.json()
             return result["content"][0]["text"]
@@ -303,7 +324,10 @@ def call_ai_api(prompt, provider, model):
                 json={
                     "model": use_model,
                     "messages": [
-                        {"role": "system", "content": "あなたは株式市場の専門アナリストです。データに基づいた客観的な分析を行い、具体的な数値を含む売買判断を提供します。"},
+                        {
+                            "role": "system",
+                            "content": "あなたは株式市場の専門アナリストです。データに基づいた客観的な分析を行い、具体的な数値を含む売買判断を提供します。",
+                        },
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.3,
@@ -312,7 +336,10 @@ def call_ai_api(prompt, provider, model):
                 timeout=180,
             )
             if response.status_code != 200:
-                print(f"  warn: {provider} API error {response.status_code}: {response.text[:300]}", file=sys.stderr)
+                print(
+                    f"  warn: {provider} API error {response.status_code}: {response.text[:300]}",
+                    file=sys.stderr,
+                )
                 return None
             result = response.json()
             return result["choices"][0]["message"]["content"]
@@ -324,7 +351,10 @@ def call_ai_api(prompt, provider, model):
 
 # ─── レポート生成 ──────────────────────────────────────────
 
-def generate_report(macro, screener, analyses, market, span, depth, timestamp, ai_commentary=None, event_impact=None):
+
+def generate_report(
+    macro, screener, analyses, market, span, depth, timestamp, ai_commentary=None, event_impact=None
+):
     """Markdownレポート生成"""
     labels_market = {"us": "米国株", "jp": "日本株", "all": "全市場"}
     labels_span = {"short": "短期", "swing": "スイング", "medium": "中期", "all": "全スパン"}
@@ -337,17 +367,21 @@ def generate_report(macro, screener, analyses, market, span, depth, timestamp, a
     lines.append(f"- **対象**: {ml}")
     mode_label = "🤖 AI分析" if ai_commentary else "🤖 自動実行"
     lines.append(f"- **実行モード**: {mode_label} (depth={depth})")
-    lines.append(f"- **種別**: 売買判断")
+    lines.append("- **種別**: 売買判断")
     lines.append("")
     lines.append("### 🔧 使用ツール")
     ai_flag = " --ai" if ai_commentary else ""
-    lines.append(f"- `scripts/auto_analyze.py --market {market} --span {span} --depth {depth}{ai_flag}`")
+    lines.append(
+        f"- `scripts/auto_analyze.py --market {market} --span {span} --depth {depth}{ai_flag}`"
+    )
     lines.append("- `scripts/event_impact_analyzer.py` (マクロイベント因果分析)")
     if ai_commentary:
         lines.append("- gh copilot (Copilot Premium / Claude Sonnet 4.6)")
     lines.append("")
     lines.append("### 📚 参照情報")
-    lines.append("- スクリーナー、テクニカル指標、ファンダメンタル、センチメント、マクロ指標（各スクリプト出力）")
+    lines.append(
+        "- スクリーナー、テクニカル指標、ファンダメンタル、センチメント、マクロ指標（各スクリプト出力）"
+    )
     lines.append("- Google News RSS（日英）ニュースによるイベント因果分析")
     lines.append("")
     lines.append("---")
@@ -369,12 +403,16 @@ def generate_report(macro, screener, analyses, market, span, depth, timestamp, a
     if macro:
         env = macro.get("market_environment", {})
         indicators = macro.get("indicators", {})
-        lines.append(f"## 📊 市場環境: **{env.get('assessment', '不明')}** (スコア: {env.get('score', 'N/A')})")
+        lines.append(
+            f"## 📊 市場環境: **{env.get('assessment', '不明')}** (スコア: {env.get('score', 'N/A')})"
+        )
         lines.append("")
         lines.append("| 指標 | 現在値 | 20日変動 |")
         lines.append("|------|--------|----------|")
         for key, ind in indicators.items():
-            lines.append(f"| {ind.get('label', key)} | {ind.get('current', 'N/A')} | {ind.get('change_20d', 'N/A')} |")
+            lines.append(
+                f"| {ind.get('label', key)} | {ind.get('current', 'N/A')} | {ind.get('change_20d', 'N/A')} |"
+            )
         lines.append("")
         signals = env.get("signals", [])
         if signals:
@@ -386,7 +424,9 @@ def generate_report(macro, screener, analyses, market, span, depth, timestamp, a
     # スクリーニング
     if screener and "summary" in screener:
         s = screener["summary"]
-        lines.append(f"## 🔍 スクリーニング ({s.get('data_obtained', '?')}/{s.get('scan_universe', '?')} 銘柄)")
+        lines.append(
+            f"## 🔍 スクリーニング ({s.get('data_obtained', '?')}/{s.get('scan_universe', '?')} 銘柄)"
+        )
         lines.append("")
         lines.append("| 戦略 | ヒット | 上位銘柄 |")
         lines.append("|------|--------|---------|")
@@ -423,22 +463,32 @@ def generate_report(macro, screener, analyses, market, span, depth, timestamp, a
             entry = scorer.get("entry_points", [])
             risk = scorer.get("risk_management", {})
 
-            lines.append(f"- **判断**: {sm.get('action', '?')} | **スコア**: {sm.get('total_score', '?')} | **確信度**: {sm.get('confidence', '?')}")
+            lines.append(
+                f"- **判断**: {sm.get('action', '?')} | **スコア**: {sm.get('total_score', '?')} | **確信度**: {sm.get('confidence', '?')}"
+            )
             lines.append(f"- **現在値**: {cs}{scorer.get('current_price', '?')}")
             lines.append("")
 
             if prob:
                 lines.append("| 期間 | 上昇確率 | +α達成 | 下落リスク |")
                 lines.append("|------|---------|--------|-----------|")
-                lines.append(f"| 5日 | {prob.get('5日後に上昇', '?')} | +3%: {prob.get('5日後に+3%以上', '?')} | -3%: {prob.get('5日後に-3%以下', '?')} |")
-                lines.append(f"| 20日 | {prob.get('20日後に上昇', '?')} | +5%: {prob.get('20日後に+5%以上', '?')} | -5%: {prob.get('20日後に-5%以下', '?')} |")
-                lines.append(f"| 60日 | {prob.get('60日後に上昇', '?')} | +10%: {prob.get('60日後に+10%以上', '?')} | — |")
+                lines.append(
+                    f"| 5日 | {prob.get('5日後に上昇', '?')} | +3%: {prob.get('5日後に+3%以上', '?')} | -3%: {prob.get('5日後に-3%以下', '?')} |"
+                )
+                lines.append(
+                    f"| 20日 | {prob.get('20日後に上昇', '?')} | +5%: {prob.get('20日後に+5%以上', '?')} | -5%: {prob.get('20日後に-5%以下', '?')} |"
+                )
+                lines.append(
+                    f"| 60日 | {prob.get('60日後に上昇', '?')} | +10%: {prob.get('60日後に+10%以上', '?')} | — |"
+                )
                 lines.append("")
 
             if entry:
                 for e in entry:
                     lines.append(f"- **{e.get('type', '')}**: {cs}{e.get('price', '?')}")
-                lines.append(f"- 損切り: {cs}{risk.get('損切りライン', '?')} / 利確1: {cs}{risk.get('利確目標1（ATR×2）', '?')} / 利確2: {cs}{risk.get('利確目標2（ATR×4）', '?')}")
+                lines.append(
+                    f"- 損切り: {cs}{risk.get('損切りライン', '?')} / 利確1: {cs}{risk.get('利確目標1（ATR×2）', '?')} / 利確2: {cs}{risk.get('利確目標2（ATR×4）', '?')}"
+                )
                 lines.append("")
 
         if fund:
@@ -446,13 +496,19 @@ def generate_report(macro, screener, analyses, market, span, depth, timestamp, a
             val = fund.get("valuation", {})
             prof = fund.get("profitability", {})
             analyst = fund.get("analyst", {})
-            lines.append(f"- ファンダ: {fs.get('score', '?')}/{fs.get('max_score', 70)} | PER={val.get('PER', '?')} PBR={val.get('PBR', '?')} ROE={prof.get('ROE', '?')}")
+            lines.append(
+                f"- ファンダ: {fs.get('score', '?')}/{fs.get('max_score', 70)} | PER={val.get('PER', '?')} PBR={val.get('PBR', '?')} ROE={prof.get('ROE', '?')}"
+            )
             if analyst:
-                lines.append(f"- アナリスト: {analyst.get('推奨', '?')} 目標{cs}{analyst.get('目標株価(平均)', '?')}")
+                lines.append(
+                    f"- アナリスト: {analyst.get('推奨', '?')} 目標{cs}{analyst.get('目標株価(平均)', '?')}"
+                )
             lines.append("")
 
         if sent:
-            lines.append(f"- センチメント: ポジ{sent.get('positive_pct', '?')}% / ネガ{sent.get('negative_pct', '?')}% ({sent.get('total', '?')}件)")
+            lines.append(
+                f"- センチメント: ポジ{sent.get('positive_pct', '?')}% / ネガ{sent.get('negative_pct', '?')}% ({sent.get('total', '?')}件)"
+            )
             lines.append("")
 
         if ai_commentary:
@@ -482,9 +538,9 @@ def _render_event_impact_section(event_impact: dict) -> list[str]:
 
     dir_map = {
         "risk_off": "⚠️ リスクオフ",
-        "risk_on":  "✅ リスクオン",
-        "mixed":    "⚡ 方向性まちまち",
-        "neutral":  "➖ 中立",
+        "risk_on": "✅ リスクオン",
+        "mixed": "⚡ 方向性まちまち",
+        "neutral": "➖ 中立",
     }
     mag_sym = {"high": "◎", "medium": "○", "low": "△"}
     direction = event_impact.get("market_direction", "neutral")
@@ -496,7 +552,7 @@ def _render_event_impact_section(event_impact: dict) -> list[str]:
 
     # トリガーされたルール
     lines.append("### 🔑 検知されたマクロイベント")
-    for key, info in event_impact["triggered_rules"].items():
+    for _key, info in event_impact["triggered_rules"].items():
         lines.append(f"- **{info['label']}** ({info['count']}件ヒット)")
         for h in info.get("headlines", [])[:2]:
             lines.append(f"  - {h}")
@@ -510,11 +566,19 @@ def _render_event_impact_section(event_impact: dict) -> list[str]:
         neg_s = {k: v for k, v in sector_impacts.items() if v["direction"] == "negative"}
         if pos_s:
             lines.append("**↑ 恩恵を受けるセクター:**")
-            for sector, info in sorted(pos_s.items(), key=lambda x: {"high":3,"medium":2,"low":1}[x[1]["magnitude"]], reverse=True):
+            for sector, info in sorted(
+                pos_s.items(),
+                key=lambda x: {"high": 3, "medium": 2, "low": 1}[x[1]["magnitude"]],
+                reverse=True,
+            ):
                 lines.append(f"  - {mag_sym[info['magnitude']]} **{sector}**: {info['reason']}")
         if neg_s:
             lines.append("**↓ 影響を受けるセクター:**")
-            for sector, info in sorted(neg_s.items(), key=lambda x: {"high":3,"medium":2,"low":1}[x[1]["magnitude"]], reverse=True):
+            for sector, info in sorted(
+                neg_s.items(),
+                key=lambda x: {"high": 3, "medium": 2, "low": 1}[x[1]["magnitude"]],
+                reverse=True,
+            ):
                 lines.append(f"  - {mag_sym[info['magnitude']]} **{sector}**: {info['reason']}")
         lines.append("")
 
@@ -523,8 +587,12 @@ def _render_event_impact_section(event_impact: dict) -> list[str]:
     if asset_impacts:
         lines.append("### 💱 資産・為替への波及")
         asset_labels = {
-            "oil": "原油", "gold": "金", "bonds": "国債",
-            "usdjpy": "ドル円", "dxy": "ドルインデックス", "nikkei": "日経平均",
+            "oil": "原油",
+            "gold": "金",
+            "bonds": "国債",
+            "usdjpy": "ドル円",
+            "dxy": "ドルインデックス",
+            "nikkei": "日経平均",
         }
         for asset, info in asset_impacts.items():
             arrow = "↑" if info["direction"] == "positive" else "↓"
@@ -554,10 +622,10 @@ def run_analysis(market, span, depth, use_ai=False, ai_provider="copilot", ai_mo
     file_ts = now.strftime("%Y-%m-%d_%H%M%S")
 
     steps = "6" if use_ai else "5"
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  自動分析開始: {timestamp}")
     print(f"  market={market}, span={span}, depth={depth}, ai={use_ai}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # 1. マクロ
     print(f"1/{steps} マクロ環境...")
@@ -577,7 +645,9 @@ def run_analysis(market, span, depth, use_ai=False, ai_provider="copilot", ai_mo
     # 3. スクリーニング
     print(f"3/{steps} スクリーニング...")
     top_n = 3 if depth == "quick" else 5
-    screener = run_script("screener.py", ["--market", market, "--strategy", "all", "--top", str(top_n)], timeout=300)
+    screener = run_script(
+        "screener.py", ["--market", market, "--strategy", "all", "--top", str(top_n)], timeout=300
+    )
     if not screener:
         print("ERROR: スクリーニング失敗", file=sys.stderr)
         return None
@@ -606,15 +676,23 @@ def run_analysis(market, span, depth, use_ai=False, ai_provider="copilot", ai_mo
             "macro": macro,
             "event_impact": event_impact,
             "screener_summary": screener.get("summary") if screener else None,
-            "analyses": []
+            "analyses": [],
         }
         for a in analyses:
             entry = {"ticker": a["info"]["ticker"], "name": a["info"].get("name", "")}
             if a.get("scorer"):
                 entry["scorer"] = {
-                    k: a["scorer"][k] for k in
-                    ["current_price", "analysis_summary", "probability", "entry_points",
-                     "risk_management", "volatility", "returns", "technical_indicators"]
+                    k: a["scorer"][k]
+                    for k in [
+                        "current_price",
+                        "analysis_summary",
+                        "probability",
+                        "entry_points",
+                        "risk_management",
+                        "volatility",
+                        "returns",
+                        "technical_indicators",
+                    ]
                     if k in a["scorer"]
                 }
             if a.get("fundamentals"):
@@ -633,7 +711,9 @@ def run_analysis(market, span, depth, use_ai=False, ai_provider="copilot", ai_mo
 
     # 6. レポート生成 & 保存
     print(f"{steps}/{steps} レポート生成...")
-    report = generate_report(macro, screener, analyses, market, span, depth, timestamp, ai_commentary, event_impact)
+    report = generate_report(
+        macro, screener, analyses, market, span, depth, timestamp, ai_commentary, event_impact
+    )
 
     DIARY_DIR.mkdir(exist_ok=True)
     ml = {"us": "米国株", "jp": "日本株", "all": "全市場"}.get(market, market)
@@ -643,28 +723,30 @@ def run_analysis(market, span, depth, use_ai=False, ai_provider="copilot", ai_mo
     filepath = DIARY_DIR / filename
     filepath.write_text(report, encoding="utf-8")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  完了! diary/{filename}")
     if ai_commentary:
-        print(f"  🤖 AI分析レポート生成済み")
-    print(f"{'='*60}")
+        print("  🤖 AI分析レポート生成済み")
+    print(f"{'=' * 60}")
 
     for a in analyses:
         info = a["info"]
         sc = a.get("scorer", {})
         sm = sc.get("analysis_summary", {}) if sc else {}
         p = sc.get("probability", {}) if sc else {}
-        print(f"  {info['ticker']:10s} | {sm.get('action', '?'):6s} | スコア {str(sm.get('total_score', '?')):>4s} | 60日↑ {p.get('60日後に上昇', '?')}")
+        print(
+            f"  {info['ticker']:10s} | {sm.get('action', '?'):6s} | スコア {str(sm.get('total_score', '?')):>4s} | 60日↑ {p.get('60日後に上昇', '?')}"
+        )
 
     return str(filepath)
 
 
 def daemon_mode(market, span, depth, interval, use_ai=False, ai_provider="copilot", ai_model=None):
     """デーモンモード"""
-    print(f"デーモンモード: {interval}秒({interval//60}分)ごとに自動実行")
+    print(f"デーモンモード: {interval}秒({interval // 60}分)ごとに自動実行")
     if use_ai:
         print(f"AI分析: {ai_provider} (model: {ai_model or 'default'})")
-    print(f"Ctrl+C で停止\n")
+    print("Ctrl+C で停止\n")
     count = 0
     while True:
         count += 1
@@ -673,7 +755,7 @@ def daemon_mode(market, span, depth, interval, use_ai=False, ai_provider="copilo
             run_analysis(market, span, depth, use_ai, ai_provider, ai_model)
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr)
-        print(f"\n次回: {interval}秒後 ({interval//60}分後)")
+        print(f"\n次回: {interval}秒後 ({interval // 60}分後)")
         try:
             time.sleep(interval)
         except KeyboardInterrupt:
@@ -683,18 +765,52 @@ def daemon_mode(market, span, depth, interval, use_ai=False, ai_provider="copilo
 
 def main():
     parser = argparse.ArgumentParser(description="自動分析スクリプト（AI分析対応）")
-    parser.add_argument("--market", choices=["us", "jp", "all"], default="jp", help="市場 (default: jp)")
-    parser.add_argument("--span", choices=["short", "swing", "medium", "all"], default="medium", help="スパン (default: medium)")
-    parser.add_argument("--depth", choices=["quick", "standard", "detailed"], default="standard", help="深さ (default: standard)")
-    parser.add_argument("--ai", action="store_true", help="AI分析を有効化（Copilot / GitHub Models / OpenAI / Anthropic）")
-    parser.add_argument("--ai-provider", choices=["copilot", "github", "openai", "anthropic"], default="copilot", help="AIプロバイダー (default: copilot)")
-    parser.add_argument("--ai-model", type=str, default=None, help="使用するAIモデル（省略時はプロバイダーのデフォルト）")
+    parser.add_argument(
+        "--market", choices=["us", "jp", "all"], default="jp", help="市場 (default: jp)"
+    )
+    parser.add_argument(
+        "--span",
+        choices=["short", "swing", "medium", "all"],
+        default="medium",
+        help="スパン (default: medium)",
+    )
+    parser.add_argument(
+        "--depth",
+        choices=["quick", "standard", "detailed"],
+        default="standard",
+        help="深さ (default: standard)",
+    )
+    parser.add_argument(
+        "--ai",
+        action="store_true",
+        help="AI分析を有効化（Copilot / GitHub Models / OpenAI / Anthropic）",
+    )
+    parser.add_argument(
+        "--ai-provider",
+        choices=["copilot", "github", "openai", "anthropic"],
+        default="copilot",
+        help="AIプロバイダー (default: copilot)",
+    )
+    parser.add_argument(
+        "--ai-model",
+        type=str,
+        default=None,
+        help="使用するAIモデル（省略時はプロバイダーのデフォルト）",
+    )
     parser.add_argument("--daemon", action="store_true", help="デーモンモード")
     parser.add_argument("--interval", type=int, default=1800, help="間隔(秒) (default: 1800=30分)")
     args = parser.parse_args()
 
     if args.daemon:
-        daemon_mode(args.market, args.span, args.depth, args.interval, args.ai, args.ai_provider, args.ai_model)
+        daemon_mode(
+            args.market,
+            args.span,
+            args.depth,
+            args.interval,
+            args.ai,
+            args.ai_provider,
+            args.ai_model,
+        )
     else:
         run_analysis(args.market, args.span, args.depth, args.ai, args.ai_provider, args.ai_model)
 

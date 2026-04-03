@@ -1,9 +1,10 @@
 [project]
 name = "stock-selector"
 version = "0.1.0"
-description = "株式売買判断アシスタント — スクリーニング・テクニカル分析・自動売買シミュレーション"
+description = "AI-driven stock screening, technical analysis, and simulated trading system"
 readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "MIT" }
 dependencies = [
     "yfinance>=0.2.36",
     "pandas>=2.0",
@@ -15,4 +16,32 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = []
+dev = [
+    "pyright>=1.1.408",
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
+reportAttributeAccessIssue = "warning"
+reportArgumentType = "warning"
+reportCallIssue = "warning"
+reportOptionalMemberAccess = "warning"
+reportIndexIssue = "warning"

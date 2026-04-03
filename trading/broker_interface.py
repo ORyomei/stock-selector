@@ -7,30 +7,32 @@ Order、Position、BrokerInterface を定義し、
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 
-class OrderSide(str, Enum):
+class OrderSide(StrEnum):
     """注文の売買方向"""
+
     BUY = "BUY"
     SELL = "SELL"
 
 
-class OrderType(str, Enum):
+class OrderType(StrEnum):
     """注文タイプ"""
+
     MARKET = "MARKET"  # 成行注文
-    LIMIT = "LIMIT"    # 指値注文
-    STOP = "STOP"      # 逆指値注文
+    LIMIT = "LIMIT"  # 指値注文
+    STOP = "STOP"  # 逆指値注文
 
 
-class OrderStatus(str, Enum):
+class OrderStatus(StrEnum):
     """注文ステータス"""
-    PENDING = "PENDING"                # 未約定
+
+    PENDING = "PENDING"  # 未約定
     PARTIALLY_FILLED = "PARTIALLY_FILLED"  # 部分約定
-    FILLED = "FILLED"                  # 約定済み
-    CANCELLED = "CANCELLED"            # キャンセル済み
-    REJECTED = "REJECTED"              # 却下
+    FILLED = "FILLED"  # 約定済み
+    CANCELLED = "CANCELLED"  # キャンセル済み
+    REJECTED = "REJECTED"  # 却下
 
 
 @dataclass
@@ -51,6 +53,7 @@ class Order:
         stop_loss: 損切りライン価格（オプション）
         take_profit: 利確ポイント価格（オプション）
     """
+
     id: str  # UUID として生成される
     ticker: str
     side: OrderSide
@@ -58,13 +61,13 @@ class Order:
     entry_price: float  # 指値価格、成行の場合は 0.0
     order_type: OrderType
     order_time: datetime
-    
+
     filled_quantity: int = 0
-    fill_price: Optional[float] = None
+    fill_price: float | None = None
     status: OrderStatus = OrderStatus.PENDING
-    stop_loss: Optional[float] = None
-    take_profit: Optional[float] = None
-    
+    stop_loss: float | None = None
+    take_profit: float | None = None
+
     def to_dict(self) -> dict:
         """JSON シリアライズ用"""
         return {
@@ -98,22 +101,27 @@ class Position:
         pnl: 未決済損益
         pnl_pct: 未決済損益率（%）
     """
+
     ticker: str
     quantity: int
     entry_price: float
     current_price: float
     entry_time: datetime
-    
-    stop_loss: Optional[float] = None
-    take_profit: Optional[float] = None
+
+    stop_loss: float | None = None
+    take_profit: float | None = None
     pnl: float = field(default=0.0, init=False)
     pnl_pct: float = field(default=0.0, init=False)
-    
+
     def __post_init__(self):
         """pnl を計算"""
         self.pnl = (self.current_price - self.entry_price) * self.quantity
-        self.pnl_pct = ((self.current_price - self.entry_price) / self.entry_price * 100) if self.entry_price != 0 else 0.0
-    
+        self.pnl_pct = (
+            ((self.current_price - self.entry_price) / self.entry_price * 100)
+            if self.entry_price != 0
+            else 0.0
+        )
+
     def to_dict(self) -> dict:
         """JSON シリアライズ用"""
         return {
@@ -156,8 +164,8 @@ class BrokerInterface(ABC):
         quantity: int,
         order_type: OrderType = OrderType.MARKET,
         entry_price: float = 0.0,
-        stop_loss: Optional[float] = None,
-        take_profit: Optional[float] = None,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
     ) -> Order:
         """注文発注
 

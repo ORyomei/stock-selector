@@ -10,6 +10,7 @@ Usage:
 SQLite の analyses テーブルから過去の推奨を取得し、
 実際のその後の値動きと比較して的中率・リターンを算出する。
 """
+
 import argparse
 import json
 import sqlite3
@@ -140,8 +141,7 @@ def main():
             results.append(v)
 
     if not results:
-        print("検証可能なデータがありませんでした（推奨日からの日数不足の可能性）",
-              file=sys.stderr)
+        print("検証可能なデータがありませんでした（推奨日からの日数不足の可能性）", file=sys.stderr)
         sys.exit(1)
 
     # ---- 統計サマリー ----
@@ -152,10 +152,16 @@ def main():
     buy_results = [r for r in results if r["direction"] == "買い"]
     sell_results = [r for r in results if r["direction"] == "売り"]
 
-    buy_accuracy = (round(sum(1 for r in buy_results if r["correct"]) / len(buy_results) * 100, 1)
-                    if buy_results else None)
-    sell_accuracy = (round(sum(1 for r in sell_results if r["correct"]) / len(sell_results) * 100, 1)
-                     if sell_results else None)
+    buy_accuracy = (
+        round(sum(1 for r in buy_results if r["correct"]) / len(buy_results) * 100, 1)
+        if buy_results
+        else None
+    )
+    sell_accuracy = (
+        round(sum(1 for r in sell_results if r["correct"]) / len(sell_results) * 100, 1)
+        if sell_results
+        else None
+    )
 
     avg_return = round(sum(r["return_pct"] for r in results) / total, 2) if total > 0 else 0
 
@@ -186,7 +192,8 @@ def main():
             "correct": data["correct"],
             "accuracy": round(data["correct"] / data["total"] * 100, 1) if data["total"] > 0 else 0,
             "avg_return": round(sum(data["returns"]) / len(data["returns"]), 2)
-            if data["returns"] else 0,
+            if data["returns"]
+            else 0,
         }
 
     summary = {

@@ -9,14 +9,14 @@ Usage:
 ウォッチリスト/ポートフォリオの銘柄を監視し、
 価格急変・損切りライン到達・テクニカルシグナル発生を検知する。
 """
+
 import argparse
 import json
-import math
 import sys
 from pathlib import Path
 
-import yfinance as yf
 import ta
+import yfinance as yf
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 PORTFOLIO_PATH = Path(__file__).parent.parent / "portfolio.json"
@@ -80,8 +80,11 @@ def check_ticker(ticker: str) -> dict | None:
         macd_dc = macd_hist < 0 and macd_hist_prev >= 0
 
         # ATR
-        atr = float(ta.volatility.AverageTrueRange(high, low, close, window=14)
-                     .average_true_range().iloc[-1])
+        atr = float(
+            ta.volatility.AverageTrueRange(high, low, close, window=14)
+            .average_true_range()
+            .iloc[-1]
+        )
 
         # 52週高安
         high_52w = info.get("fiftyTwoWeekHigh")
@@ -92,85 +95,109 @@ def check_ticker(ticker: str) -> dict | None:
 
         # 価格急変
         if abs(ret_1d) > 5:
-            alerts.append({
-                "type": "急変",
-                "severity": "高",
-                "message": f"1日で{ret_1d:+.1f}%の{'急騰' if ret_1d > 0 else '急落'}",
-            })
+            alerts.append(
+                {
+                    "type": "急変",
+                    "severity": "高",
+                    "message": f"1日で{ret_1d:+.1f}%の{'急騰' if ret_1d > 0 else '急落'}",
+                }
+            )
         elif abs(ret_1d) > 3:
-            alerts.append({
-                "type": "変動",
-                "severity": "中",
-                "message": f"1日で{ret_1d:+.1f}%の{'上昇' if ret_1d > 0 else '下落'}",
-            })
+            alerts.append(
+                {
+                    "type": "変動",
+                    "severity": "中",
+                    "message": f"1日で{ret_1d:+.1f}%の{'上昇' if ret_1d > 0 else '下落'}",
+                }
+            )
 
         # 出来高異常
         if vol_ratio > 3.0:
-            alerts.append({
-                "type": "出来高異常",
-                "severity": "高",
-                "message": f"出来高が20日平均の{vol_ratio:.1f}倍",
-            })
+            alerts.append(
+                {
+                    "type": "出来高異常",
+                    "severity": "高",
+                    "message": f"出来高が20日平均の{vol_ratio:.1f}倍",
+                }
+            )
         elif vol_ratio > 2.0:
-            alerts.append({
-                "type": "出来高増加",
-                "severity": "中",
-                "message": f"出来高が20日平均の{vol_ratio:.1f}倍",
-            })
+            alerts.append(
+                {
+                    "type": "出来高増加",
+                    "severity": "中",
+                    "message": f"出来高が20日平均の{vol_ratio:.1f}倍",
+                }
+            )
 
         # テクニカルシグナル
         if rsi < 25:
-            alerts.append({
-                "type": "RSI極端",
-                "severity": "高",
-                "message": f"RSI={rsi:.1f} — 極端に売られすぎ（反発候補）",
-            })
+            alerts.append(
+                {
+                    "type": "RSI極端",
+                    "severity": "高",
+                    "message": f"RSI={rsi:.1f} — 極端に売られすぎ（反発候補）",
+                }
+            )
         elif rsi > 80:
-            alerts.append({
-                "type": "RSI極端",
-                "severity": "高",
-                "message": f"RSI={rsi:.1f} — 極端に買われすぎ（天井候補）",
-            })
+            alerts.append(
+                {
+                    "type": "RSI極端",
+                    "severity": "高",
+                    "message": f"RSI={rsi:.1f} — 極端に買われすぎ（天井候補）",
+                }
+            )
 
         if macd_gc:
-            alerts.append({
-                "type": "MACDゴールデンクロス",
-                "severity": "中",
-                "message": "MACD GC発生 → 買いシグナル",
-            })
+            alerts.append(
+                {
+                    "type": "MACDゴールデンクロス",
+                    "severity": "中",
+                    "message": "MACD GC発生 → 買いシグナル",
+                }
+            )
         elif macd_dc:
-            alerts.append({
-                "type": "MACDデッドクロス",
-                "severity": "中",
-                "message": "MACD DC発生 → 売りシグナル",
-            })
+            alerts.append(
+                {
+                    "type": "MACDデッドクロス",
+                    "severity": "中",
+                    "message": "MACD DC発生 → 売りシグナル",
+                }
+            )
 
         if current < bb_lower:
-            alerts.append({
-                "type": "BB下限割れ",
-                "severity": "中",
-                "message": f"ボリンジャーバンド下限割れ（下限: {bb_lower:.2f}）",
-            })
+            alerts.append(
+                {
+                    "type": "BB下限割れ",
+                    "severity": "中",
+                    "message": f"ボリンジャーバンド下限割れ（下限: {bb_lower:.2f}）",
+                }
+            )
         elif current > bb_upper:
-            alerts.append({
-                "type": "BB上限突破",
-                "severity": "中",
-                "message": f"ボリンジャーバンド上限突破（上限: {bb_upper:.2f}）",
-            })
+            alerts.append(
+                {
+                    "type": "BB上限突破",
+                    "severity": "中",
+                    "message": f"ボリンジャーバンド上限突破（上限: {bb_upper:.2f}）",
+                }
+            )
 
         # 52週高安接近
         if high_52w and current >= high_52w * 0.98:
-            alerts.append({
-                "type": "52週高値接近",
-                "severity": "中",
-                "message": f"52週高値に接近（高値: {high_52w:.2f}）",
-            })
+            alerts.append(
+                {
+                    "type": "52週高値接近",
+                    "severity": "中",
+                    "message": f"52週高値に接近（高値: {high_52w:.2f}）",
+                }
+            )
         if low_52w and current <= low_52w * 1.02:
-            alerts.append({
-                "type": "52週安値接近",
-                "severity": "高",
-                "message": f"52週安値に接近（安値: {low_52w:.2f}）",
-            })
+            alerts.append(
+                {
+                    "type": "52週安値接近",
+                    "severity": "高",
+                    "message": f"52週安値に接近（安値: {low_52w:.2f}）",
+                }
+            )
 
         return {
             "ticker": ticker,
@@ -219,18 +246,22 @@ def check_portfolio_stops(portfolio: dict) -> list[dict]:
             }
 
             if stop_loss and current <= stop_loss:
-                holding_alert["alerts"].append({
-                    "type": "損切り到達",
-                    "severity": "高",
-                    "message": f"損切りライン{stop_loss}に到達（現在値: {current:.2f}）",
-                })
+                holding_alert["alerts"].append(
+                    {
+                        "type": "損切り到達",
+                        "severity": "高",
+                        "message": f"損切りライン{stop_loss}に到達（現在値: {current:.2f}）",
+                    }
+                )
 
             if take_profit and current >= take_profit:
-                holding_alert["alerts"].append({
-                    "type": "利確到達",
-                    "severity": "中",
-                    "message": f"利確目標{take_profit}に到達（現在値: {current:.2f}）",
-                })
+                holding_alert["alerts"].append(
+                    {
+                        "type": "利確到達",
+                        "severity": "中",
+                        "message": f"利確目標{take_profit}に到達（現在値: {current:.2f}）",
+                    }
+                )
 
             if holding_alert["alerts"]:
                 alerts.append(holding_alert)
@@ -244,8 +275,9 @@ def check_portfolio_stops(portfolio: dict) -> list[dict]:
 def main():
     parser = argparse.ArgumentParser(description="アラート・監視")
     parser.add_argument("--ticker", type=str, default=None, help="特定銘柄のみチェック")
-    parser.add_argument("--check-portfolio", action="store_true",
-                        help="ポートフォリオの損切り/利確チェック")
+    parser.add_argument(
+        "--check-portfolio", action="store_true", help="ポートフォリオの損切り/利確チェック"
+    )
     args = parser.parse_args()
 
     results = []
@@ -256,8 +288,13 @@ def main():
         if portfolio_alerts:
             print(json.dumps({"portfolio_alerts": portfolio_alerts}, ensure_ascii=False, indent=2))
         else:
-            print(json.dumps({"portfolio_alerts": [], "message": "アラートなし"},
-                             ensure_ascii=False, indent=2))
+            print(
+                json.dumps(
+                    {"portfolio_alerts": [], "message": "アラートなし"},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
         return
 
     if args.ticker:

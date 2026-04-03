@@ -6,13 +6,12 @@ Usage: python scripts/macro.py [--period 3mo]
 VIX, 米10年金利, ドル円, 原油先物, 金先物, 主要指数を取得し、
 市場環境スコア（リスクオン/オフ）を算出する。
 """
+
 import argparse
 import json
 import math
-import sys
 
 import yfinance as yf
-import numpy as np
 
 # ---- 監視対象シンボル ----
 MACRO_SYMBOLS = {
@@ -45,11 +44,17 @@ def fetch_macro(period: str = "3mo"):
 
             # 5日・20日リターン
             ret_5d = float((close.iloc[-1] / close.iloc[-6] - 1) * 100) if len(close) >= 6 else None
-            ret_20d = float((close.iloc[-1] / close.iloc[-21] - 1) * 100) if len(close) >= 21 else None
+            ret_20d = (
+                float((close.iloc[-1] / close.iloc[-21] - 1) * 100) if len(close) >= 21 else None
+            )
 
             # 20日ボラティリティ
             daily_ret = close.pct_change().dropna()
-            vol = float(daily_ret.tail(20).std() * math.sqrt(252) * 100) if len(daily_ret) >= 20 else None
+            vol = (
+                float(daily_ret.tail(20).std() * math.sqrt(252) * 100)
+                if len(daily_ret) >= 20
+                else None
+            )
 
             # 位置（直近高安に対する位置）
             h20 = float(close.tail(20).max())
@@ -93,7 +98,7 @@ def fetch_macro(period: str = "3mo"):
     if us10y is not None:
         us10y_5d = data.get("US10Y", {}).get("change_5d")
         if us10y_5d:
-            change = float(us10y_5d.strip('%'))
+            change = float(us10y_5d.strip("%"))
             if change > 5:
                 env_score -= 10
                 env_signals.append(f"金利急上昇({us10y_5d}) → 株式に逆風")
@@ -104,7 +109,7 @@ def fetch_macro(period: str = "3mo"):
     # S&P500 トレンド
     sp_change_20d = data.get("SP500", {}).get("change_20d")
     if sp_change_20d:
-        change = float(sp_change_20d.strip('%'))
+        change = float(sp_change_20d.strip("%"))
         if change > 5:
             env_score += 10
             env_signals.append(f"S&P500上昇トレンド({sp_change_20d})")
@@ -115,7 +120,7 @@ def fetch_macro(period: str = "3mo"):
     # 原油動向
     oil_change_20d = data.get("OIL", {}).get("change_20d")
     if oil_change_20d:
-        change = float(oil_change_20d.strip('%'))
+        change = float(oil_change_20d.strip("%"))
         if change > 10:
             env_signals.append(f"原油急騰({oil_change_20d}) → インフレ懸念")
         elif change < -10:
@@ -124,7 +129,7 @@ def fetch_macro(period: str = "3mo"):
     # ドル円
     usdjpy_change_20d = data.get("USDJPY", {}).get("change_20d")
     if usdjpy_change_20d:
-        change = float(usdjpy_change_20d.strip('%'))
+        change = float(usdjpy_change_20d.strip("%"))
         if change > 3:
             env_signals.append(f"円安進行({usdjpy_change_20d}) → 輸出企業に追い風")
         elif change < -3:

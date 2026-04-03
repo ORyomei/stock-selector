@@ -6,6 +6,7 @@ Usage: python scripts/fetch_sentiment.py <query> [--limit 20]
 重み付き辞書＋否定表現検出＋多言語対応で精度の高いセンチメント分析を行う。
 Google News の日本語・英語両方のヘッドラインを統合して分析。
 """
+
 import argparse
 import json
 import re
@@ -14,41 +15,110 @@ from urllib.parse import quote
 
 import feedparser
 
-
 # ---- 重み付きセンチメント辞書 ----
 POSITIVE_DICT = {
     # 日本語 (重み: 1=弱, 2=中, 3=強)
-    "急騰": 3, "暴騰": 3, "ストップ高": 3, "上方修正": 3, "過去最高": 3,
-    "上昇": 2, "好調": 2, "増収": 2, "増益": 2, "回復": 2, "成長": 2,
-    "買い": 2, "強気": 2, "好材料": 2, "最高値": 2, "反発": 2,
-    "堅調": 1, "底堅い": 1, "出遅れ": 1, "割安": 1, "高配当": 1,
-    "目標株価引き上げ": 3, "格上げ": 3, "増配": 2,
+    "急騰": 3,
+    "暴騰": 3,
+    "ストップ高": 3,
+    "上方修正": 3,
+    "過去最高": 3,
+    "上昇": 2,
+    "好調": 2,
+    "増収": 2,
+    "増益": 2,
+    "回復": 2,
+    "成長": 2,
+    "買い": 2,
+    "強気": 2,
+    "好材料": 2,
+    "最高値": 2,
+    "反発": 2,
+    "堅調": 1,
+    "底堅い": 1,
+    "出遅れ": 1,
+    "割安": 1,
+    "高配当": 1,
+    "目標株価引き上げ": 3,
+    "格上げ": 3,
+    "増配": 2,
     # 英語
-    "surge": 3, "soar": 3, "skyrocket": 3, "upgrade": 3,
-    "rally": 2, "gain": 2, "rise": 2, "bullish": 2, "growth": 2,
-    "profit": 2, "beat": 2, "outperform": 2, "buy": 2,
-    "recover": 1, "rebound": 1, "steady": 1, "upside": 2,
+    "surge": 3,
+    "soar": 3,
+    "skyrocket": 3,
+    "upgrade": 3,
+    "rally": 2,
+    "gain": 2,
+    "rise": 2,
+    "bullish": 2,
+    "growth": 2,
+    "profit": 2,
+    "beat": 2,
+    "outperform": 2,
+    "buy": 2,
+    "recover": 1,
+    "rebound": 1,
+    "steady": 1,
+    "upside": 2,
 }
 
 NEGATIVE_DICT = {
     # 日本語
-    "急落": 3, "暴落": 3, "ストップ安": 3, "下方修正": 3, "債務超過": 3,
-    "下落": 2, "低迷": 2, "減収": 2, "減益": 2, "懸念": 2, "リスク": 1,
-    "売り": 2, "弱気": 2, "悪材料": 2, "赤字": 2, "損失": 2,
-    "不振": 2, "警戒": 1, "調整": 1,
-    "目標株価引き下げ": 3, "格下げ": 3, "減配": 2, "無配": 2,
+    "急落": 3,
+    "暴落": 3,
+    "ストップ安": 3,
+    "下方修正": 3,
+    "債務超過": 3,
+    "下落": 2,
+    "低迷": 2,
+    "減収": 2,
+    "減益": 2,
+    "懸念": 2,
+    "リスク": 1,
+    "売り": 2,
+    "弱気": 2,
+    "悪材料": 2,
+    "赤字": 2,
+    "損失": 2,
+    "不振": 2,
+    "警戒": 1,
+    "調整": 1,
+    "目標株価引き下げ": 3,
+    "格下げ": 3,
+    "減配": 2,
+    "無配": 2,
     # 英語
-    "crash": 3, "plunge": 3, "plummet": 3, "downgrade": 3,
-    "fall": 2, "drop": 2, "decline": 2, "bearish": 2, "loss": 2,
-    "miss": 2, "underperform": 2, "sell": 2, "fear": 2,
-    "risk": 1, "concern": 1, "weak": 1, "slump": 2, "recession": 2,
+    "crash": 3,
+    "plunge": 3,
+    "plummet": 3,
+    "downgrade": 3,
+    "fall": 2,
+    "drop": 2,
+    "decline": 2,
+    "bearish": 2,
+    "loss": 2,
+    "miss": 2,
+    "underperform": 2,
+    "sell": 2,
+    "fear": 2,
+    "risk": 1,
+    "concern": 1,
+    "weak": 1,
+    "slump": 2,
+    "recession": 2,
 }
 
 # 否定表現: これらの直後のセンチメントを反転させる
 NEGATION_PATTERNS_JA = ["ない", "ず", "止まる", "止まった", "鈍化", "頭打ち", "一服"]
 NEGATION_PATTERNS_EN = [
-    r"\bnot\b", r"\bno\b", r"\bn't\b", r"\bfails?\b", r"\bstops?\b",
-    r"\bdespite\b", r"\bhalts?\b", r"\bslows?\b",
+    r"\bnot\b",
+    r"\bno\b",
+    r"\bn't\b",
+    r"\bfails?\b",
+    r"\bstops?\b",
+    r"\bdespite\b",
+    r"\bhalts?\b",
+    r"\bslows?\b",
 ]
 
 
@@ -119,11 +189,13 @@ def analyze_sentiment(texts: list[str]) -> dict:
         else:
             neutral += 1
 
-        details.append({
-            "text": text[:120],
-            "sentiment": label,
-            "score": score,
-        })
+        details.append(
+            {
+                "text": text[:120],
+                "sentiment": label,
+                "score": score,
+            }
+        )
 
     total = len(texts) if texts else 1
     avg_score = round(sum(scores) / total, 3) if scores else 0.0

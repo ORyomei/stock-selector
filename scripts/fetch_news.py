@@ -5,12 +5,13 @@ Usage: python scripts/fetch_news.py <query> [--lang ja] [--limit 10]
 
 Google News RSS を使ってニュースを取得する。
 """
+
 import argparse
 import json
 import sys
+import time
 from urllib.parse import quote
 
-import time
 import feedparser
 
 
@@ -37,12 +38,16 @@ def fetch_news(query: str, lang: str = "ja", limit: int = 10, retries: int = 2):
 
     articles = []
     for entry in feed.entries[:limit]:
-        articles.append({
-            "title": entry.get("title", ""),
-            "link": entry.get("link", ""),
-            "published": entry.get("published", ""),
-            "source": entry.get("source", {}).get("title", "") if hasattr(entry, "source") else "",
-        })
+        articles.append(
+            {
+                "title": entry.get("title", ""),
+                "link": entry.get("link", ""),
+                "published": entry.get("published", ""),
+                "source": entry.get("source", {}).get("title", "")
+                if hasattr(entry, "source")
+                else "",
+            }
+        )
 
     result = {
         "query": query,

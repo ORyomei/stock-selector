@@ -4,25 +4,27 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 
 from .broker_interface import Order, OrderSide, OrderType
 
 
-class TradeAction(str, Enum):
+class TradeAction(StrEnum):
     """取引アクション"""
-    BUY = "BUY"      # 買い
-    SELL = "SELL"    # 売り
+
+    BUY = "BUY"  # 買い
+    SELL = "SELL"  # 売り
     CLOSE = "CLOSE"  # ポジション全量クローズ
 
 
-class TimeSpan(str, Enum):
+class TimeSpan(StrEnum):
     """取引スパン"""
-    SHORT = "short"      # デイトレ・短期（1日以内）
-    SWING = "swing"      # スイング（数日～1週間）
-    MEDIUM = "medium"    # 中期（1週間～1ヶ月）
-    LONG = "long"        # 長期（1ヶ月以上）
+
+    SHORT = "short"  # デイトレ・短期（1日以内）
+    SWING = "swing"  # スイング（数日～1週間）
+    MEDIUM = "medium"  # 中期（1週間～1ヶ月）
+    LONG = "long"  # 長期（1ヶ月以上）
 
 
 @dataclass
@@ -42,18 +44,19 @@ class TradingSignal:
         score: 総合スコア (0-100)
         timestamp: シグナル生成時刻
     """
+
     ticker: str
     action: TradeAction
     confidence: float  # 0.0 ~ 1.0
     target_price: float
     stop_loss_price: float
     take_profit_price: float
-    
+
     entry_price: float = 0.0  # 成行の場合は 0.0
     timespan: TimeSpan = TimeSpan.SWING
     reason: str = ""
     score: int = 0
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def validate(self) -> bool:
         """シグナルの妥当性チェック"""
@@ -67,17 +70,18 @@ class TradingSignal:
             return False
         if self.entry_price < 0:
             return False
-        
+
         # 買いの場合: stop_loss < entry_price < take_profit
         if self.action == TradeAction.BUY:
             if not (self.stop_loss_price < self.target_price <= self.take_profit_price):
                 return False
-        
+
         # 売りの場合: take_profit < entry_price < stop_loss
-        elif self.action == TradeAction.SELL:
-            if not (self.take_profit_price < self.target_price <= self.stop_loss_price):
-                return False
-        
+        elif self.action == TradeAction.SELL and not (  # noqa: SIM102
+            self.take_profit_price < self.target_price <= self.stop_loss_price
+        ):
+            return False
+
         return True
 
     def to_dict(self) -> dict:
@@ -157,7 +161,7 @@ class OrderManager:
             quantity=quantity,
             entry_price=entry_price,
             order_type=order_type,
-            order_time=datetime.now(timezone.utc),
+            order_time=datetime.now(UTC),
             stop_loss=signal.stop_loss_price,
             take_profit=signal.take_profit_price,
         )
@@ -187,7 +191,9 @@ class OrderManager:
                 qty = self.risk_manager.calculate_position_size(
                     balance=current_balance,
                     ticker=signal.ticker,
-                    entry_price=signal.entry_price if signal.entry_price > 0 else signal.target_price,
+                    entry_price=signal.entry_price
+                    if signal.entry_price > 0
+                    else signal.target_price,
                     stop_loss_price=signal.stop_loss_price,
                     confidence=signal.confidence,
                 )
@@ -199,13 +205,13 @@ class OrderManager:
         # confidence と score により決定
         confidence_ratio = signal.confidence  # 0.0 ~ 1.0
         score_ratio = signal.score / 100.0  # 0.0 ~ 1.0
-        
+
         # 平均比率
         avg_ratio = (confidence_ratio + score_ratio) / 2.0
-        
+
         # 基本数量（テスト用）
         base_qty = 10  # JPY は 1 株単位を想定
-        
+
         quantity = int(base_qty * avg_ratio)
-        
+
         return max(1, quantity)  # 最小 1 株

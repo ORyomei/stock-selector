@@ -5,9 +5,9 @@ Usage: python scripts/fundamentals.py <ticker>
 
 yfinance から決算データ・財務諸表を取得し、成長性・収益性・財務健全性を評価する。
 """
+
 import argparse
 import json
-import sys
 
 import yfinance as yf
 
@@ -34,8 +34,9 @@ def analyze_fundamentals(ticker: str):
         "時価総額": info.get("marketCap"),
         "企業価値(EV)": info.get("enterpriseValue"),
     }
-    result["valuation"] = {k: round(v, 2) if isinstance(v, float) else v
-                           for k, v in valuation.items() if v is not None}
+    result["valuation"] = {
+        k: round(v, 2) if isinstance(v, float) else v for k, v in valuation.items() if v is not None
+    }
 
     # ---- 収益性 ----
     profitability = {
@@ -45,8 +46,9 @@ def analyze_fundamentals(ticker: str):
         "ROE": info.get("returnOnEquity"),
         "ROA": info.get("returnOnAssets"),
     }
-    result["profitability"] = {k: f"{round(v * 100, 1)}%" for k, v in profitability.items()
-                               if v is not None}
+    result["profitability"] = {
+        k: f"{round(v * 100, 1)}%" for k, v in profitability.items() if v is not None
+    }
 
     # ---- 成長性 ----
     growth = {
@@ -73,8 +75,9 @@ def analyze_fundamentals(ticker: str):
         "フリーCF": info.get("freeCashflow"),
         "営業CF": info.get("operatingCashflow"),
     }
-    result["financial_health"] = {k: round(v, 2) if isinstance(v, float) else v
-                                  for k, v in health.items() if v is not None}
+    result["financial_health"] = {
+        k: round(v, 2) if isinstance(v, float) else v for k, v in health.items() if v is not None
+    }
 
     # ---- 配当 ----
     dividend = {
@@ -111,14 +114,15 @@ def analyze_fundamentals(ticker: str):
                 eps_est = row.get("EPS Estimate")
                 eps_act = row.get("Reported EPS")
                 if eps_est is not None and eps_act is not None:
-                    surprise_pct = ((eps_act - eps_est) / abs(eps_est) * 100
-                                    if eps_est != 0 else 0)
-                    surprises.append({
-                        "date": str(idx.date()) if hasattr(idx, 'date') else str(idx),
-                        "EPS予想": round(float(eps_est), 3),
-                        "EPS実績": round(float(eps_act), 3),
-                        "サプライズ": f"{round(surprise_pct, 1)}%",
-                    })
+                    surprise_pct = (eps_act - eps_est) / abs(eps_est) * 100 if eps_est != 0 else 0
+                    surprises.append(
+                        {
+                            "date": str(idx.date()) if hasattr(idx, "date") else str(idx),
+                            "EPS予想": round(float(eps_est), 3),
+                            "EPS実績": round(float(eps_act), 3),
+                            "サプライズ": f"{round(surprise_pct, 1)}%",
+                        }
+                    )
             if surprises:
                 result["earnings_surprise"] = surprises
     except Exception:

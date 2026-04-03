@@ -9,6 +9,7 @@ Usage:
 
 仮想ポートフォリオで売買をシミュレーションし、損益を追跡する。
 """
+
 import argparse
 import json
 import sys
@@ -50,16 +51,25 @@ def get_currency(ticker: str) -> str:
     return "USD"
 
 
-def cmd_buy(portfolio: dict, ticker: str, shares: int, price: float,
-            stop_loss: float | None = None, take_profit: float | None = None):
+def cmd_buy(
+    portfolio: dict,
+    ticker: str,
+    shares: int,
+    price: float,
+    stop_loss: float | None = None,
+    take_profit: float | None = None,
+):
     """買い注文"""
     currency = get_currency(ticker)
     total_cost = price * shares
 
     cash_key = "cash_jpy" if currency == "JPY" else "cash_usd"
     if portfolio[cash_key] < total_cost:
-        print(f"ERROR: 資金不足。必要: {currency} {total_cost:,.0f}、"
-              f"残高: {currency} {portfolio[cash_key]:,.0f}", file=sys.stderr)
+        print(
+            f"ERROR: 資金不足。必要: {currency} {total_cost:,.0f}、"
+            f"残高: {currency} {portfolio[cash_key]:,.0f}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     portfolio[cash_key] -= total_cost
@@ -95,26 +105,34 @@ def cmd_buy(portfolio: dict, ticker: str, shares: int, price: float,
         portfolio["holdings"].append(holding)
 
     # 取引履歴
-    portfolio["history"].append({
-        "type": "buy",
-        "ticker": ticker,
-        "shares": shares,
-        "price": price,
-        "total": round(total_cost, 2),
-        "currency": currency,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+    portfolio["history"].append(
+        {
+            "type": "buy",
+            "ticker": ticker,
+            "shares": shares,
+            "price": price,
+            "total": round(total_cost, 2),
+            "currency": currency,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
 
     save_portfolio(portfolio)
-    print(json.dumps({
-        "action": "買い",
-        "ticker": ticker,
-        "shares": shares,
-        "price": price,
-        "total_cost": round(total_cost, 2),
-        "currency": currency,
-        "remaining_cash": round(portfolio[cash_key], 2),
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "action": "買い",
+                "ticker": ticker,
+                "shares": shares,
+                "price": price,
+                "total_cost": round(total_cost, 2),
+                "currency": currency,
+                "remaining_cash": round(portfolio[cash_key], 2),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def cmd_sell(portfolio: dict, ticker: str, shares: int, price: float):
@@ -130,8 +148,9 @@ def cmd_sell(portfolio: dict, ticker: str, shares: int, price: float):
         sys.exit(1)
 
     if existing["shares"] < shares:
-        print(f"ERROR: 保有株数不足。保有: {existing['shares']}株、売却: {shares}株",
-              file=sys.stderr)
+        print(
+            f"ERROR: 保有株数不足。保有: {existing['shares']}株、売却: {shares}株", file=sys.stderr
+        )
         sys.exit(1)
 
     currency = get_currency(ticker)
@@ -146,30 +165,38 @@ def cmd_sell(portfolio: dict, ticker: str, shares: int, price: float):
     if existing["shares"] == 0:
         portfolio["holdings"].remove(existing)
 
-    portfolio["history"].append({
-        "type": "sell",
-        "ticker": ticker,
-        "shares": shares,
-        "price": price,
-        "total": round(total_proceeds, 2),
-        "pnl": round(pnl, 2),
-        "pnl_pct": f"{pnl_pct:+.2f}%",
-        "currency": currency,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+    portfolio["history"].append(
+        {
+            "type": "sell",
+            "ticker": ticker,
+            "shares": shares,
+            "price": price,
+            "total": round(total_proceeds, 2),
+            "pnl": round(pnl, 2),
+            "pnl_pct": f"{pnl_pct:+.2f}%",
+            "currency": currency,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
 
     save_portfolio(portfolio)
-    print(json.dumps({
-        "action": "売り",
-        "ticker": ticker,
-        "shares": shares,
-        "price": price,
-        "total_proceeds": round(total_proceeds, 2),
-        "pnl": round(pnl, 2),
-        "pnl_pct": f"{pnl_pct:+.2f}%",
-        "currency": currency,
-        "remaining_cash": round(portfolio[cash_key], 2),
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "action": "売り",
+                "ticker": ticker,
+                "shares": shares,
+                "price": price,
+                "total_proceeds": round(total_proceeds, 2),
+                "pnl": round(pnl, 2),
+                "pnl_pct": f"{pnl_pct:+.2f}%",
+                "currency": currency,
+                "remaining_cash": round(portfolio[cash_key], 2),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def cmd_status(portfolio: dict):
@@ -193,28 +220,36 @@ def cmd_status(portfolio: dict):
         else:
             total_value_usd += market_value
 
-        holdings_detail.append({
-            "ticker": ticker,
-            "shares": h["shares"],
-            "entry_price": h["entry_price"],
-            "current_price": round(current_price, 2),
-            "market_value": round(market_value, 2),
-            "pnl": round(pnl, 2),
-            "pnl_pct": f"{pnl_pct:+.2f}%",
-            "currency": h["currency"],
-            "entry_date": h.get("entry_date", "N/A"),
-            "stop_loss": h.get("stop_loss"),
-            "take_profit": h.get("take_profit"),
-        })
+        holdings_detail.append(
+            {
+                "ticker": ticker,
+                "shares": h["shares"],
+                "entry_price": h["entry_price"],
+                "current_price": round(current_price, 2),
+                "market_value": round(market_value, 2),
+                "pnl": round(pnl, 2),
+                "pnl_pct": f"{pnl_pct:+.2f}%",
+                "currency": h["currency"],
+                "entry_date": h.get("entry_date", "N/A"),
+                "stop_loss": h.get("stop_loss"),
+                "take_profit": h.get("take_profit"),
+            }
+        )
 
-    print(json.dumps({
-        "cash_jpy": round(portfolio["cash_jpy"], 0),
-        "cash_usd": round(portfolio["cash_usd"], 2),
-        "total_value_jpy": round(total_value_jpy, 0),
-        "total_value_usd": round(total_value_usd, 2),
-        "holdings": holdings_detail,
-        "trade_count": len(portfolio.get("history", [])),
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "cash_jpy": round(portfolio["cash_jpy"], 0),
+                "cash_usd": round(portfolio["cash_usd"], 2),
+                "total_value_jpy": round(total_value_jpy, 0),
+                "total_value_usd": round(total_value_usd, 2),
+                "holdings": holdings_detail,
+                "trade_count": len(portfolio.get("history", [])),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def cmd_performance(portfolio: dict):
@@ -233,25 +268,34 @@ def cmd_performance(portfolio: dict):
 
     avg_win = sum(s["pnl"] for s in wins) / len(wins) if wins else 0
     avg_loss = sum(s["pnl"] for s in losses) / len(losses) if losses else 0
-    profit_factor = abs(sum(s["pnl"] for s in wins) / sum(s["pnl"] for s in losses)) if losses else float("inf")
+    profit_factor = (
+        abs(sum(s["pnl"] for s in wins) / sum(s["pnl"] for s in losses)) if losses else float("inf")
+    )
 
-    print(json.dumps({
-        "total_trades": len(sells),
-        "wins": len(wins),
-        "losses": len(losses),
-        "win_rate": f"{win_rate:.1f}%",
-        "total_pnl": round(total_pnl, 2),
-        "avg_win": round(avg_win, 2),
-        "avg_loss": round(avg_loss, 2),
-        "profit_factor": round(profit_factor, 2),
-        "recent_trades": sells[-5:],
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "total_trades": len(sells),
+                "wins": len(wins),
+                "losses": len(losses),
+                "win_rate": f"{win_rate:.1f}%",
+                "total_pnl": round(total_pnl, 2),
+                "avg_win": round(avg_win, 2),
+                "avg_loss": round(avg_loss, 2),
+                "profit_factor": round(profit_factor, 2),
+                "recent_trades": sells[-5:],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description="ポートフォリオ管理")
-    parser.add_argument("command", choices=["status", "buy", "sell", "performance"],
-                        help="コマンド")
+    parser.add_argument(
+        "command", choices=["status", "buy", "sell", "performance"], help="コマンド"
+    )
     parser.add_argument("ticker", nargs="?", help="ティッカー（buy/sell時）")
     parser.add_argument("shares", nargs="?", type=int, help="株数（buy/sell時）")
     parser.add_argument("price", nargs="?", type=float, help="価格（buy/sell時）")
@@ -269,8 +313,7 @@ def main():
         if not all([args.ticker, args.shares, args.price]):
             print("ERROR: buy には ticker, shares, price が必要です", file=sys.stderr)
             sys.exit(1)
-        cmd_buy(portfolio, args.ticker, args.shares, args.price,
-                args.stop_loss, args.take_profit)
+        cmd_buy(portfolio, args.ticker, args.shares, args.price, args.stop_loss, args.take_profit)
     elif args.command == "sell":
         if not all([args.ticker, args.shares, args.price]):
             print("ERROR: sell には ticker, shares, price が必要です", file=sys.stderr)

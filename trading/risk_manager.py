@@ -3,7 +3,7 @@
 ポジションサイズ計算、損切り/利確判定、レバレッジ制御等を担当。
 """
 
-from typing import Optional
+from datetime import UTC
 
 from .broker_interface import Position
 
@@ -180,8 +180,9 @@ class RiskManager:
             return True, f"max_loss_{max_loss_pct}pct"
 
         # 5. 保有日数タイムアウト（長く持ちすぎ）
-        from datetime import datetime, timezone
-        hold_days = (datetime.now(timezone.utc) - position.entry_time).days
+        from datetime import datetime
+
+        hold_days = (datetime.now(UTC) - position.entry_time).days
         max_hold = self.config.get("max_hold_days", 30)
         if hold_days >= max_hold:
             return True, f"hold_timeout_{hold_days}d"

@@ -6,6 +6,7 @@ Usage: python scripts/scorer.py <ticker> [--period 6mo]
 テクニカル指標・価格動向・ボラティリティから総合スコアを算出し、
 具体的なタイムスパン・目標価格・確率を出力する。
 """
+
 import argparse
 import json
 import math
@@ -13,9 +14,8 @@ import sys
 import time
 
 import numpy as np
-import yfinance as yf
 import ta
-import pandas as pd
+import yfinance as yf
 
 
 def compute_score(ticker: str, period: str = "6mo"):
@@ -47,20 +47,20 @@ def compute_score(ticker: str, period: str = "6mo"):
     rsi = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
     macd_ind = ta.trend.MACD(close)
     macd_line = macd_ind.macd().iloc[-1]
-    macd_signal = macd_ind.macd_signal().iloc[-1]
+    macd_ind.macd_signal().iloc[-1]
     macd_hist = macd_ind.macd_diff().iloc[-1]
 
     bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
     bb_upper = bb.bollinger_hband().iloc[-1]
     bb_lower = bb.bollinger_lband().iloc[-1]
-    bb_middle = bb.bollinger_mavg().iloc[-1]
+    bb.bollinger_mavg().iloc[-1]
     bb_pct = (current - bb_lower) / (bb_upper - bb_lower) if (bb_upper - bb_lower) > 0 else 0.5
 
     sma_5 = close.rolling(5).mean().iloc[-1]
     sma_25 = close.rolling(25).mean().iloc[-1]
     sma_75 = close.rolling(75).mean().iloc[-1] if len(close) >= 75 else sma_25
-    ema_12 = close.ewm(span=12).mean().iloc[-1]
-    ema_26 = close.ewm(span=26).mean().iloc[-1]
+    close.ewm(span=12).mean().iloc[-1]
+    close.ewm(span=26).mean().iloc[-1]
 
     # ---- ボラティリティ (20日) ----
     daily_returns = close.pct_change().dropna()
@@ -77,8 +77,8 @@ def compute_score(ticker: str, period: str = "6mo"):
 
     # ---- リターン計算 ----
     ret_1d = float(daily_returns.iloc[-1]) if len(daily_returns) >= 1 else 0
-    ret_5d = float((close.iloc[-1] / close.iloc[-6] - 1)) if len(close) >= 6 else 0
-    ret_20d = float((close.iloc[-1] / close.iloc[-21] - 1)) if len(close) >= 21 else 0
+    ret_5d = float(close.iloc[-1] / close.iloc[-6] - 1) if len(close) >= 6 else 0
+    ret_20d = float(close.iloc[-1] / close.iloc[-21] - 1) if len(close) >= 21 else 0
 
     # ============================================
     # スコアリング (-100 〜 +100)
@@ -192,10 +192,10 @@ def compute_score(ticker: str, period: str = "6mo"):
     # 目標価格の算出
     # ============================================
     # ATRベースの目標価格帯
-    target_upper_short = round(current + atr * 2, 2)    # 短期上値目標
-    target_lower_short = round(current - atr * 2, 2)    # 短期下値目標
-    target_upper_mid = round(current + atr * 4, 2)      # 中期上値目標
-    target_lower_mid = round(current - atr * 4, 2)      # 中期下値目標
+    target_upper_short = round(current + atr * 2, 2)  # 短期上値目標
+    target_lower_short = round(current - atr * 2, 2)  # 短期下値目標
+    target_upper_mid = round(current + atr * 4, 2)  # 中期上値目標
+    target_lower_mid = round(current - atr * 4, 2)  # 中期下値目標
 
     # サポート/レジスタンス（直近の高値安値）
     recent_high = float(high.tail(20).max())
@@ -231,45 +231,59 @@ def compute_score(ticker: str, period: str = "6mo"):
     # タイムスパン推奨
     timeframes = []
     if abs(total_score) >= 30 and vol_ratio > 1.2:
-        timeframes.append({
-            "span": "短期（1-5営業日）",
-            "reason": "強いシグナル＋出来高増加で短期的な動きが期待される",
-        })
+        timeframes.append(
+            {
+                "span": "短期（1-5営業日）",
+                "reason": "強いシグナル＋出来高増加で短期的な動きが期待される",
+            }
+        )
     if abs(total_score) >= 15:
-        timeframes.append({
-            "span": "スイング（1-3週間）",
-            "reason": "テクニカル指標の方向性が明確",
-        })
+        timeframes.append(
+            {
+                "span": "スイング（1-3週間）",
+                "reason": "テクニカル指標の方向性が明確",
+            }
+        )
     if current < sma_75 * 0.9 or current > sma_75 * 1.1:
-        timeframes.append({
-            "span": "中期（1-3ヶ月）",
-            "reason": f"75日SMAとの乖離が大きい（乖離率: {round((current / sma_75 - 1) * 100, 1)}%）",
-        })
+        timeframes.append(
+            {
+                "span": "中期（1-3ヶ月）",
+                "reason": f"75日SMAとの乖離が大きい（乖離率: {round((current / sma_75 - 1) * 100, 1)}%）",
+            }
+        )
     if not timeframes:
-        timeframes.append({
-            "span": "様子見（明確なエントリーポイントを待つ）",
-            "reason": "シグナルが弱く、方向性が不明確",
-        })
+        timeframes.append(
+            {
+                "span": "様子見（明確なエントリーポイントを待つ）",
+                "reason": "シグナルが弱く、方向性が不明確",
+            }
+        )
 
     # エントリーポイント
     entry_points = []
     if total_score > 0:
-        entry_points.append({
-            "type": "指値買い",
-            "price": round(max(support_1, current - atr), 2),
-            "reason": "直近サポートまたはATR1本分の押し目",
-        })
-        entry_points.append({
-            "type": "逆指値買い（ブレイクアウト）",
-            "price": round(resistance_1 * 1.005, 2),
-            "reason": "直近高値超えで上昇モメンタム確認後エントリー",
-        })
+        entry_points.append(
+            {
+                "type": "指値買い",
+                "price": round(max(support_1, current - atr), 2),
+                "reason": "直近サポートまたはATR1本分の押し目",
+            }
+        )
+        entry_points.append(
+            {
+                "type": "逆指値買い（ブレイクアウト）",
+                "price": round(resistance_1 * 1.005, 2),
+                "reason": "直近高値超えで上昇モメンタム確認後エントリー",
+            }
+        )
     elif total_score < 0:
-        entry_points.append({
-            "type": "指値売り",
-            "price": round(min(resistance_1, current + atr), 2),
-            "reason": "直近レジスタンスまたはATR1本分の戻り",
-        })
+        entry_points.append(
+            {
+                "type": "指値売り",
+                "price": round(min(resistance_1, current + atr), 2),
+                "reason": "直近レジスタンスまたはATR1本分の戻り",
+            }
+        )
 
     # 損切り・利確
     if total_score > 0:
@@ -316,7 +330,9 @@ def compute_score(ticker: str, period: str = "6mo"):
             "損切りライン": stop_loss,
             "利確目標1（ATR×2）": take_profit_1,
             "利確目標2（ATR×4）": take_profit_2,
-            "リスクリワード比": round(abs(take_profit_1 - current) / abs(current - stop_loss), 2) if abs(current - stop_loss) > 0 else 0,
+            "リスクリワード比": round(abs(take_profit_1 - current) / abs(current - stop_loss), 2)
+            if abs(current - stop_loss) > 0
+            else 0,
         },
         "volatility": {
             "20日ボラティリティ（日次）": f"{round(vol_20d * 100, 2)}%",
