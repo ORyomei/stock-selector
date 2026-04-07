@@ -4,8 +4,8 @@
 
 ## 基本動作
 
-1. ユーザーの指示を受けたら、必要な情報を `scripts/` 配下のスクリプトや CLI/Web 取得で収集する
-2. 特定銘柄の指定がなければ、**スクリーナー (`scripts/screener.py`) を使って市場全体から有望銘柄を自動発見**する
+1. ユーザーの指示を受けたら、必要な情報を `src/scripts/` 配下のスクリプトや CLI/Web 取得で収集する
+2. 特定銘柄の指定がなければ、**スクリーナー (`src/scripts/screener.py`) を使って市場全体から有望銘柄を自動発見**する
 3. 収集した情報を総合的に分析し、売買判断を行う
 4. 結果を Chat で報告し、`diary/` に記録する
 
@@ -27,30 +27,30 @@ source .venv/bin/activate
 
 ```bash
 source .venv/bin/activate
-python3 scripts/screener.py --market all --strategy all --top 10
-python3 scripts/scorer.py AAPL
-python3 scripts/fetch_news.py "NVIDIA"
+python3 src/scripts/screener.py --market all --strategy all --top 10
+python3 src/scripts/scorer.py AAPL
+python3 src/scripts/fetch_news.py "NVIDIA"
 ```
 
 ## 情報収集の手段
 
 ### コアスクリプト
-- **銘柄発掘（スクリーナー）**: `python3 scripts/screener.py [--market us|jp|all] [--strategy oversold|momentum|breakout|value|all] [--top N] [--universe default|expanded]` で市場全体から有望銘柄を自動発見
+- **銘柄発掘（スクリーナー）**: `python3 src/scripts/screener.py [--market us|jp|all] [--strategy oversold|momentum|breakout|value|all] [--top N] [--universe default|expanded]` で市場全体から有望銘柄を自動発見
   - `--universe expanded` で S&P500 + 日経225 の拡張ユニバース（約230銘柄）をスキャン
-- **株価**: `python3 scripts/fetch_prices.py <ticker>` で取得（リトライ付き）
-- **ニュース**: `python3 scripts/fetch_news.py <query>` で取得（リトライ付き）、または Web ページを直接フェッチ
-- **センチメント分析**: `python3 scripts/fetch_sentiment.py <query>` で重み付き辞書＋否定表現検出・日英両方のヘッドラインを統合分析
-- **テクニカル指標**: `python3 scripts/technical.py <ticker>` で算出
-- **総合スコアリング**: `python3 scripts/scorer.py <ticker>` で算出（確率・目標価格・エントリーポイント含む）
+- **株価**: `python3 src/scripts/fetch_prices.py <ticker>` で取得（リトライ付き）
+- **ニュース**: `python3 src/scripts/fetch_news.py <query>` で取得（リトライ付き）、または Web ページを直接フェッチ
+- **センチメント分析**: `python3 src/scripts/fetch_sentiment.py <query>` で重み付き辞書＋否定表現検出・日英両方のヘッドラインを統合分析
+- **テクニカル指標**: `python3 src/scripts/technical.py <ticker>` で算出
+- **総合スコアリング**: `python3 src/scripts/scorer.py <ticker>` で算出（確率・目標価格・エントリーポイント含む）
 
 ### 新規追加スクリプト
-- **ファンダメンタル分析**: `python3 scripts/fundamentals.py <ticker>` で決算・財務諸表・バリュエーション・収益性・成長性・アナリスト予想・決算サプライズを総合評価（ファンダメンタルスコア付き）
-- **マクロ経済指標**: `python3 scripts/macro.py` で VIX・米10年金利・ドル円・原油・金・主要指数を取得。市場環境スコア（リスクオン/オフ）を算出
-- **バックテスト**: `python3 scripts/backtest.py [--days N] [--min-score N]` で過去の推奨を実際の値動きと比較し的中率を検証
-- **アラート・監視**: `python3 scripts/alert.py` でウォッチリスト銘柄の急変・テクニカルシグナルを検知。`--check-portfolio` でポートフォリオの損切り/利確チェック
-- **ポートフォリオ管理**: `python3 scripts/portfolio.py [status|buy|sell|performance]` で仮想売買の実行・損益追跡・パフォーマンス統計
-- **自動分析**: `python3 scripts/auto_analyze.py [--market us|jp|all] [--span short|swing|medium|all] [--depth quick|standard|detailed] [--daemon] [--interval 秒]` で定期的な自動スキャン+分析+レポート保存。`--daemon --interval 1800` で30分ごとに自動実行
-- **自動売買ループ**: `python3 scripts/auto_trade.py [--market us|jp|all] [--min-score N] [--max-signals N] [--dry-run] [--daemon] [--interval 秒]` でスクリーニング→スコアリング→シグナル生成→発注→クローズ判定を全自動実行。`--dry-run` で注文なしテスト、`--daemon --interval 1800` で30分ごとに自動売買
+- **ファンダメンタル分析**: `python3 src/scripts/fundamentals.py <ticker>` で決算・財務諸表・バリュエーション・収益性・成長性・アナリスト予想・決算サプライズを総合評価（ファンダメンタルスコア付き）
+- **マクロ経済指標**: `python3 src/scripts/macro.py` で VIX・米10年金利・ドル円・原油・金・主要指数を取得。市場環境スコア（リスクオン/オフ）を算出
+- **バックテスト**: `python3 src/scripts/backtest.py [--days N] [--min-score N]` で過去の推奨を実際の値動きと比較し的中率を検証
+- **アラート・監視**: `python3 src/scripts/alert.py` でウォッチリスト銘柄の急変・テクニカルシグナルを検知。`--check-portfolio` でポートフォリオの損切り/利確チェック
+- **ポートフォリオ管理**: `python3 src/scripts/portfolio.py [status|buy|sell|performance]` で仮想売買の実行・損益追跡・パフォーマンス統計
+- **自動分析**: `python3 src/scripts/auto_analyze.py [--market us|jp|all] [--span short|swing|medium|all] [--depth quick|standard|detailed] [--daemon] [--interval 秒]` で定期的な自動スキャン+分析+レポート保存。`--daemon --interval 1800` で30分ごとに自動実行
+- **自動売買ループ**: `python3 src/scripts/auto_trade.py [--market us|jp|all] [--min-score N] [--max-signals N] [--dry-run] [--daemon] [--interval 秒]` でスクリーニング→スコアリング→シグナル生成→発注→クローズ判定を全自動実行。`--dry-run` で注文なしテスト、`--daemon --interval 1800` で30分ごとに自動売買
 
 ### 外部情報源
 - **Web ページ取得**: `fetch_webpage` ツールでニュース記事本文・IR資料・決算短信を直接読み取り可能
@@ -61,20 +61,20 @@ python3 scripts/fetch_news.py "NVIDIA"
 ### 自律探索モード
 
 ユーザーが特定の銘柄を指定しない場合（「なにか儲かりそうな株を探して」「おすすめ教えて」など）:
-1. まず `scripts/macro.py` で市場環境（リスクオン/オフ）を確認
-2. `scripts/screener.py --market all --strategy all` で全市場をスキャン
+1. まず `src/scripts/macro.py` で市場環境（リスクオン/オフ）を確認
+2. `src/scripts/screener.py --market all --strategy all` で全市場をスキャン
 3. 各戦略（売られすぎ・モメンタム・ブレイクアウト・バリュー）の上位候補を抽出
-4. 有望な候補に対して `scripts/scorer.py <ticker>` で詳細テクニカル分析
-5. `scripts/fundamentals.py <ticker>` でファンダメンタル評価
+4. 有望な候補に対して `src/scripts/scorer.py <ticker>` で詳細テクニカル分析
+5. `src/scripts/fundamentals.py <ticker>` でファンダメンタル評価
 6. ニュース・センチメントも確認して総合判断
-7. 過去の推奨精度を `scripts/backtest.py` で確認し、信頼性を付記
+7. 過去の推奨精度を `src/scripts/backtest.py` で確認し、信頼性を付記
 
 ### 定期チェックモード
 
 市場オープン時には以下を実行:
-1. `scripts/alert.py` でウォッチリスト・ポートフォリオのアラートチェック
-2. `scripts/alert.py --check-portfolio` で保有銘柄の損切り/利確到達チェック
-3. `scripts/macro.py` で市場環境の変化を確認
+1. `src/scripts/alert.py` でウォッチリスト・ポートフォリオのアラートチェック
+2. `src/scripts/alert.py --check-portfolio` で保有銘柄の損切り/利確到達チェック
+3. `src/scripts/macro.py` で市場環境の変化を確認
 
 ## 出力フォーマット
 
@@ -152,7 +152,7 @@ python3 scripts/fetch_news.py "NVIDIA"
 
 ### 🔧 使用ツール
 - (実行したスクリプトやMCPツール名を列挙)
-- 例: `scripts/scorer.py NVDA`, `scripts/fetch_news.py "NVIDIA"`, `MCP fetch (Yahoo!ファイナンス)`, `MCP sqlite (過去分析検索)` など
+- 例: `src/scripts/scorer.py NVDA`, `src/scripts/fetch_news.py "NVIDIA"`, `MCP fetch (Yahoo!ファイナンス)`, `MCP sqlite (過去分析検索)` など
 
 ### 📚 参照情報
 - (分析に使った情報ソースとその概要を列挙)
@@ -167,7 +167,7 @@ python3 scripts/fetch_news.py "NVIDIA"
 **ヘッダの記載ルール:**
 - 「使用ツール」にはスクリプト実行コマンド（引数含む）、MCP ツール呼び出し、fetch_webpage の URL など、**実際に実行・呼び出したもの**をすべて書く
 - 「参照情報」には取得した情報の出典と要約を書く（ニュース記事タイトル、Webページ名、データの期間など）
-- ツールの実行結果が空・エラーだった場合もその旨を記録する（例: `scripts/fetch_sentiment.py "任天堂"` → ネガティブ記事が多くスコア -0.35）
+- ツールの実行結果が空・エラーだった場合もその旨を記録する（例: `src/scripts/fetch_sentiment.py "任天堂"` → ネガティブ記事が多くスコア -0.35）
 
 ### その他
 

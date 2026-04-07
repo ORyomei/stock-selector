@@ -17,7 +17,7 @@
 ## アーキテクチャ
 
 ```
-trading/
+src/trading/
 ├── __init__.py
 ├── broker_interface.py      # 抽象基底クラス
 ├── simulator.py              # ローカルシミュレーター
@@ -26,7 +26,7 @@ trading/
 ├── risk_manager.py           # リスク計算・損切り/利確判定
 └── trade_executor.py         # 統合オーケストレーション
 
-scripts/
+src/scripts/
 └── trade.py                  # エントリーポイント
 
 config/
@@ -321,9 +321,9 @@ class TradeExecutor:
 
 **Usage:**
 ```bash
-python scripts/trade.py --mode simulate --signal-file diary/2026-04-01_latest_signal.json
-python scripts/trade.py --check-positions  # ポジション確認のみ
-python scripts/trade.py --close NVDA 100   # 強制クローズ
+python src/scripts/trade.py --mode simulate --signal-file diary/2026-04-01_latest_signal.json
+python src/scripts/trade.py --check-positions  # ポジション確認のみ
+python src/scripts/trade.py --close NVDA 100   # 強制クローズ
 ```
 
 **基本流れ:**
@@ -351,25 +351,25 @@ python scripts/trade.py --close NVDA 100   # 強制クローズ
 
 ✅ **完了したファイル:**
 - [docs/TRADING_SPEC.md](docs/TRADING_SPEC.md) — 本仕様書
-- [trading/broker_interface.py](trading/broker_interface.py) — Order, Position, BrokerInterface
-- [trading/simulator.py](trading/simulator.py) — BrokerSimulator（ローカルメモリ管理）
-- [trading/order_manager.py](trading/order_manager.py) — TradingSignal, OrderManager
-- [trading/risk_manager.py](trading/risk_manager.py) — RiskManager
-- [trading/trade_executor.py](trading/trade_executor.py) — TradeExecutor（統合オーケストレーション）
-- [scripts/trade.py](scripts/trade.py) — メインスクリプト（CLI）
+- [src/trading/broker_interface.py](src/trading/broker_interface.py) — Order, Position, BrokerInterface
+- [src/trading/simulator.py](src/trading/simulator.py) — BrokerSimulator（ローカルメモリ管理）
+- [src/trading/order_manager.py](src/trading/order_manager.py) — TradingSignal, OrderManager
+- [src/trading/risk_manager.py](src/trading/risk_manager.py) — RiskManager
+- [src/trading/trade_executor.py](src/trading/trade_executor.py) — TradeExecutor（統合オーケストレーション）
+- [src/scripts/trade.py](src/scripts/trade.py) — メインスクリプト（CLI）
 - [config/trading_config.json](config/trading_config.json) — 取引設定
 - [config/risk_limits.json](config/risk_limits.json) — リスク限度設定
 
 ✅ **テスト済み:**
 ```bash
 # ポートフォリオ確認
-python3 scripts/trade.py --check-positions
+python3 src/scripts/trade.py --check-positions
 
 # 取引実行（テスト）
-python3 scripts/trade.py --ticker AAPL --action buy
+python3 src/scripts/trade.py --ticker AAPL --action buy
 
 # 損切り/利確チェック
-python3 scripts/trade.py --check-and-close
+python3 src/scripts/trade.py --check-and-close
 ```
 
 ### Phase 1 の特徴
