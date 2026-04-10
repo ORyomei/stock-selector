@@ -57,7 +57,7 @@ def load_or_create_broker(config: dict) -> BrokerSimulator:
     broker = BrokerSimulator(config["simulator"])
     portfolio_repo = get_container().portfolio()
     portfolio_data = portfolio_repo.load()
-    if portfolio_data.get("holdings"):
+    if portfolio_data and (portfolio_data.get("positions") or portfolio_data.get("holdings")):
         broker.from_dict(portfolio_data)
         print("✅ ポートフォリオ復元")
     else:

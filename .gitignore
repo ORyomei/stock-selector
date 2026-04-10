@@ -29,3 +29,5 @@ portfolio.json
 # OS
 .DS_Store
 Thumbs.db
+
+diary/
