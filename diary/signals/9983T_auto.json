@@ -2,11 +2,11 @@
   "ticker": "9983.T",
   "action": "buy",
   "entry_price": 0,
-  "target_price": 68053.05,
-  "stop_loss_price": 59608.69,
-  "take_profit_price": 71806.1,
-  "confidence": 0.7,
+  "target_price": 80292.52,
+  "stop_loss_price": 69599.34,
+  "take_profit_price": 85045.05,
+  "confidence": 0.8,
   "timespan": "swing",
-  "score": 10,
-  "reason": "auto_trade[AI]: score=10, やや買い"
+  "score": 20,
+  "reason": "auto_trade[AI]: score=20, 買い"
 }

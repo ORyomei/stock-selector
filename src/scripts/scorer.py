@@ -346,6 +346,7 @@ def compute_score(ticker: str, period: str = "6mo"):
     }
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
 
 
 def main():

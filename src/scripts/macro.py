@@ -165,6 +165,7 @@ def fetch_macro(period: str = "3mo"):
     }
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
 
 
 def main():

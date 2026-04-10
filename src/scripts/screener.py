@@ -599,6 +599,73 @@ def format_result(item: dict) -> dict[str, Any]:
     }
 
 
+def run_screen(
+    market: str = "all",
+    strategy: str = "all",
+    top: int = 5,
+    universe_size: str = "default",
+) -> dict[str, Any]:
+    """スクリーニングを実行して結果を返す。"""
+    universe = []
+    if market in ("us", "all"):
+        universe += US_UNIVERSE
+        if universe_size == "expanded":
+            universe += US_EXPANDED
+    if market in ("jp", "all"):
+        universe += JP_UNIVERSE
+        if universe_size == "expanded":
+            universe += JP_EXPANDED
+    universe = list(dict.fromkeys(universe))
+
+    print(f"スキャン中... {len(universe)} 銘柄を分析しています", file=sys.stderr)
+
+    results = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(analyze_single, t): t for t in universe}
+        for done, future in enumerate(as_completed(futures), 1):
+            if done % 20 == 0:
+                print(f"  進捗: {done}/{len(universe)}", file=sys.stderr)
+            result = future.result()
+            if result:
+                results.append(result)
+
+    print(f"データ取得完了: {len(results)}/{len(universe)} 銘柄", file=sys.stderr)
+
+    strategies_map = {
+        "oversold": screen_oversold,
+        "momentum": screen_momentum,
+        "breakout": screen_breakout,
+        "value": screen_value,
+    }
+
+    output = {}
+    if strategy == "all":
+        for name, func in strategies_map.items():
+            hits = func(results)
+            output[name] = [format_result(h) for h in hits[:top]]
+    else:
+        hits = strategies_map[strategy](results)
+        output[strategy] = [format_result(h) for h in hits[:top]]
+
+    total_hits = sum(len(v) for v in output.values())
+    summary = {
+        "scan_universe": len(universe),
+        "data_obtained": len(results),
+        "total_hits": total_hits,
+        "strategies": {},
+    }
+    for name, hits in output.items():
+        summary["strategies"][name] = {
+            "count": len(hits),
+            "top_picks": [h["ticker"] for h in hits],
+        }
+
+    return {
+        "summary": summary,
+        "results": output,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="株式スクリーナー")
     parser.add_argument(
@@ -619,70 +686,12 @@ def main():
     )
     args = parser.parse_args()
 
-    # ユニバース選択
-    universe = []
-    if args.market in ("us", "all"):
-        universe += US_UNIVERSE
-        if args.universe == "expanded":
-            universe += US_EXPANDED
-    if args.market in ("jp", "all"):
-        universe += JP_UNIVERSE
-        if args.universe == "expanded":
-            universe += JP_EXPANDED
-    # 重複除去
-    universe = list(dict.fromkeys(universe))
-
-    print(f"スキャン中... {len(universe)} 銘柄を分析しています", file=sys.stderr)
-
-    # 並列でデータ取得
-    results = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(analyze_single, t): t for t in universe}
-        for done, future in enumerate(as_completed(futures), 1):
-            if done % 20 == 0:
-                print(f"  進捗: {done}/{len(universe)}", file=sys.stderr)
-            result = future.result()
-            if result:
-                results.append(result)
-
-    print(f"データ取得完了: {len(results)}/{len(universe)} 銘柄", file=sys.stderr)
-
-    # スクリーニング実行
-    strategies = {
-        "oversold": screen_oversold,
-        "momentum": screen_momentum,
-        "breakout": screen_breakout,
-        "value": screen_value,
-    }
-
-    output = {}
-    if args.strategy == "all":
-        for name, func in strategies.items():
-            hits = func(results)
-            output[name] = [format_result(h) for h in hits[: args.top]]
-    else:
-        hits = strategies[args.strategy](results)
-        output[args.strategy] = [format_result(h) for h in hits[: args.top]]
-
-    # サマリー
-    total_hits = sum(len(v) for v in output.values())
-    summary = {
-        "scan_universe": len(universe),
-        "data_obtained": len(results),
-        "total_hits": total_hits,
-        "strategies": {},
-    }
-    for name, hits in output.items():
-        summary["strategies"][name] = {
-            "count": len(hits),
-            "top_picks": [h["ticker"] for h in hits],
-        }
-
-    final = {
-        "summary": summary,
-        "results": output,
-    }
-
+    final = run_screen(
+        market=args.market,
+        strategy=args.strategy,
+        top=args.top,
+        universe_size=args.universe,
+    )
     print(json.dumps(final, ensure_ascii=False, indent=2))
 
 

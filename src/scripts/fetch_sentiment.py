@@ -231,6 +231,17 @@ def fetch_from_news(query: str, limit: int) -> list[str]:
     return texts
 
 
+def run_sentiment(query: str, limit: int = 20) -> dict[str, Any] | None:
+    """センチメント分析を実行して結果を返す。"""
+    texts = fetch_from_news(query, limit)
+    if not texts:
+        return None
+    result = analyze_sentiment(texts)
+    result["query"] = query
+    result["source"] = "google_news_headlines"
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description="センチメント分析")
     parser.add_argument("query", help="検索クエリ")
