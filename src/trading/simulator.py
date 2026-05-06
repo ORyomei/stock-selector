@@ -191,11 +191,23 @@ class BrokerSimulator(BrokerInterface):
             )
         else:
             # 売り
-            proceeds = fill_price * order.quantity
+            # 保有数を超えた売りは保有数に切り詰める（ショート売り防止）
+            held_qty = 0
+            for pos in self._positions:
+                if pos.ticker == order.ticker:
+                    held_qty = pos.quantity
+                    break
+            if held_qty <= 0:
+                order.status = OrderStatus.REJECTED
+                self._filled_orders.append(order)
+                return
+            actual_qty = min(order.quantity, held_qty)
+            proceeds = fill_price * actual_qty
             self._balance[cash_key] += proceeds
+            order.quantity = actual_qty  # 実際に売った数量に補正
 
             # ポジション削減
-            self._reduce_position(order.ticker, order.quantity)
+            self._reduce_position(order.ticker, actual_qty)
 
         # Order ステータス更新
         order.filled_quantity = order.quantity
@@ -275,7 +287,9 @@ class BrokerSimulator(BrokerInterface):
         """ポジションを削減する"""
         for i, pos in enumerate(self._positions):
             if pos.ticker == ticker:
-                pos.quantity -= quantity
+                # 保有数を超えた売りは保有数に切り詰める（ショート売り防止）
+                actual_qty = min(quantity, pos.quantity)
+                pos.quantity -= actual_qty
                 if pos.quantity <= 0:
                     self._positions.pop(i)
                 else:

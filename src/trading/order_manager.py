@@ -119,12 +119,14 @@ class OrderManager:
         self,
         signal: TradingSignal,
         current_balance: dict,
+        current_positions: list | None = None,
     ) -> Order | None:
         """売買判断から Order を生成する
 
         Args:
             signal: TradingSignal インスタンス
             current_balance: 現在の残高 (get_balance() の結果)
+            current_positions: 現在の保有ポジション一覧 (CLOSE時に使用)
 
         Returns:
             Order インスタンス、または生成失敗時 None
@@ -138,12 +140,34 @@ class OrderManager:
         elif signal.action == TradeAction.SELL:
             side = OrderSide.SELL
         elif signal.action == TradeAction.CLOSE:
-            # CLOSE は SELL 扱い
+            # CLOSE は保有株数の全量売り
             side = OrderSide.SELL
+            held_qty = 0
+            if current_positions:
+                for pos in current_positions:
+                    if pos.ticker == signal.ticker:
+                        held_qty = pos.quantity
+                        break
+            if held_qty <= 0:
+                return None  # 保有なし → クローズ不要
+            quantity = held_qty
+            order_type = OrderType.MARKET
+            entry_price = 0.0
+            return Order(
+                id="",
+                ticker=signal.ticker,
+                side=side,
+                quantity=quantity,
+                entry_price=entry_price,
+                order_type=order_type,
+                order_time=datetime.now(UTC),
+                stop_loss=signal.stop_loss_price,
+                take_profit=signal.take_profit_price,
+            )
         else:
             return None
 
-        # 注文数量を計算
+        # 注文数量を計算 (BUY / SELL)
         quantity = self._calculate_quantity(signal, current_balance)
         if quantity <= 0:
             return None

@@ -620,7 +620,7 @@ def run_screen(
     print(f"スキャン中... {len(universe)} 銘柄を分析しています", file=sys.stderr)
 
     results = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(analyze_single, t): t for t in universe}
         for done, future in enumerate(as_completed(futures), 1):
             if done % 20 == 0:

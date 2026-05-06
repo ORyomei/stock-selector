@@ -37,6 +37,7 @@ def fetch_news(query: str, lang: str = "ja", limit: int = 10):
     }
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
 
 
 def main():

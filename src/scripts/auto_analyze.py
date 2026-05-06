@@ -561,25 +561,65 @@ def main() -> None:
     )
     parser.add_argument("--span", choices=["short", "swing", "medium", "all"], default="medium")
     parser.add_argument("--depth", choices=["quick", "standard", "detailed"], default="standard")
-    parser.add_argument("--ai", action="store_true", help="AI分析を有効化")
+    parser.add_argument("--ai", action="store_true", help="AI分析を有効化（legacyモード用）")
     parser.add_argument("--ai-provider", choices=PROVIDER_NAMES, default="copilot")
     parser.add_argument("--ai-model", default=None)
     parser.add_argument("--daemon", action="store_true")
     parser.add_argument("--interval", type=int, default=1800, help="間隔(秒) (default: 1800=30分)")
+    parser.add_argument("--legacy", action="store_true", help="旧パイプラインを使用（LangGraphなし）")
     args = parser.parse_args()
 
-    if args.daemon:
-        daemon_loop(
-            args.market,
-            args.span,
-            args.depth,
-            args.interval,
-            args.ai,
-            args.ai_provider,
-            args.ai_model,
-        )
+    if args.legacy:
+        # Legacy fixed-pipeline mode
+        if args.daemon:
+            daemon_loop(
+                args.market,
+                args.span,
+                args.depth,
+                args.interval,
+                args.ai,
+                args.ai_provider,
+                args.ai_model,
+            )
+        else:
+            run_analysis(args.market, args.span, args.depth, args.ai, args.ai_provider, args.ai_model)
     else:
-        run_analysis(args.market, args.span, args.depth, args.ai, args.ai_provider, args.ai_model)
+        # LangGraph agent mode (default)
+        from lib.graph_analyze import run_analyze_graph
+
+        if args.daemon:
+            print(f"デーモンモード (LangGraph): {args.interval}秒ごとに自動実行")
+            print(f"  market={args.market}  span={args.span}  depth={args.depth}")
+            print(f"  provider={args.ai_provider}")
+            print("  Ctrl+C で停止\n")
+            cycle = 0
+            while True:
+                cycle += 1
+                print(f"\n### 実行 #{cycle} ###")
+                try:
+                    run_analyze_graph(
+                        market=args.market,
+                        span=args.span,
+                        depth=args.depth,
+                        provider=args.ai_provider,
+                        model=args.ai_model,
+                    )
+                except Exception as e:
+                    print(f"ERROR: {e}", file=sys.stderr)
+                print(f"\n次回: {args.interval}秒後")
+                try:
+                    time.sleep(args.interval)
+                except KeyboardInterrupt:
+                    print("\nデーモン停止")
+                    break
+        else:
+            run_analyze_graph(
+                market=args.market,
+                span=args.span,
+                depth=args.depth,
+                provider=args.ai_provider,
+                model=args.ai_model,
+            )
 
 
 if __name__ == "__main__":

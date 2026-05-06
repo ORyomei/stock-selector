@@ -1,10 +1,19 @@
 {
   "mode": "simulator",
-  "broker": "dmmfx",
+  "broker": "simulator",
   "simulator": {
     "initial_capital_jpy": 10000000,
     "initial_capital_usd": 50000,
     "spread_pct": 0.02
+  },
+  "kabu": {
+    "host": "localhost",
+    "port": 18081,
+    "sandbox": true,
+    "api_password_env": "KABU_API_PASSWORD",
+    "default_exchange": 1,
+    "account_type": 4,
+    "timeout": 10
   },
   "live": {
     "api_endpoint": "https://api.dmmfx.com/v1",

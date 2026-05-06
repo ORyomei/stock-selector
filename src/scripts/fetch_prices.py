@@ -58,6 +58,7 @@ def fetch(ticker: str, period: str = "3mo", interval: str = "1d"):
     recent = hist.tail(10)[["Open", "High", "Low", "Close", "Volume"]]
     recent = recent.round(2)
     print(recent.to_string())
+    return summary
 
 
 def main():

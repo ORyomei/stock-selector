@@ -55,6 +55,18 @@ def run_script(
             from scripts.event_impact_analyzer import run as run_event
             return run_event()
 
+        if script_name == "technical.py":
+            from scripts.technical import analyze as run_technical
+            return run_technical(args[0]) if args else None
+
+        if script_name == "fetch_news.py":
+            from scripts.fetch_news import fetch_news
+            return fetch_news(args[0]) if args else None
+
+        if script_name == "fetch_prices.py":
+            from scripts.fetch_prices import fetch as fetch_price
+            return fetch_price(args[0]) if args else None
+
         print(f"  [warn] runner: unknown script {script_name}", file=sys.stderr)
         return None
     except Exception as e:

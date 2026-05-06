@@ -30,7 +30,43 @@ def load_portfolio() -> dict[str, Any]:
     data = get_container().portfolio().load()
     if data is None:
         return {"cash_jpy": 10_000_000, "cash_usd": 50_000, "holdings": [], "history": []}
-    return data
+    return _normalize(data)
+
+
+def _normalize(data: dict[str, Any]) -> dict[str, Any]:
+    """Convert the nested portfolio.json format to the flat format used by commands.
+
+    Actual format: {balance: {cash_jpy, cash_usd}, positions: [...], orders: {...}}
+    Expected format: {cash_jpy, cash_usd, holdings: [...], history: [...]}
+    """
+    # Already in flat format
+    if "cash_jpy" in data:
+        return data
+
+    balance = data.get("balance", {})
+    result: dict[str, Any] = {
+        "cash_jpy": balance.get("cash_jpy", 10_000_000),
+        "cash_usd": balance.get("cash_usd", 50_000),
+        "holdings": [],
+        "history": data.get("history", []),
+        "_raw": data,  # keep original for save
+    }
+
+    for p in data.get("positions", []):
+        ticker = p["ticker"]
+        entry_time = p.get("entry_time", "")
+        entry_date = entry_time[:10] if entry_time else "N/A"
+        result["holdings"].append({
+            "ticker": ticker,
+            "shares": p.get("quantity", 0),
+            "entry_price": p.get("entry_price", 0),
+            "currency": "JPY" if ticker.endswith(".T") else "USD",
+            "entry_date": entry_date,
+            "stop_loss": p.get("stop_loss"),
+            "take_profit": p.get("take_profit"),
+        })
+
+    return result
 
 
 def save_portfolio(data: dict):
@@ -39,6 +75,22 @@ def save_portfolio(data: dict):
 
 def get_current_price(ticker: str) -> float | None:
     return get_container().market_data().get_current_price(ticker)
+
+
+def get_ticker_name(ticker: str) -> str:
+    """ティッカーから表示用の銘柄名を取得する。"""
+    try:
+        info = get_container().market_data().get_ticker_info(ticker)
+        if not info:
+            return ticker
+        return (
+            info.get("shortName")
+            or info.get("longName")
+            or info.get("displayName")
+            or ticker
+        )
+    except Exception:
+        return ticker
 
 
 def get_currency(ticker: str) -> str:
@@ -201,9 +253,14 @@ def cmd_status(portfolio: dict):
     holdings_detail = []
     total_value_jpy = portfolio["cash_jpy"]
     total_value_usd = portfolio["cash_usd"]
+    name_cache: dict[str, str] = {}
 
     for h in portfolio["holdings"]:
         ticker = h["ticker"]
+        name = name_cache.get(ticker)
+        if name is None:
+            name = get_ticker_name(ticker)
+            name_cache[ticker] = name
         current_price = get_current_price(ticker)
         if current_price is None:
             current_price = h["entry_price"]
@@ -220,6 +277,7 @@ def cmd_status(portfolio: dict):
         holdings_detail.append(
             {
                 "ticker": ticker,
+                "name": name,
                 "shares": h["shares"],
                 "entry_price": h["entry_price"],
                 "current_price": round(current_price, 2),

@@ -16,7 +16,7 @@ litellm.set_verbose = False
 
 AI_PROVIDERS: dict[str, dict[str, Any]] = {
     "copilot": {
-        "model": "github_copilot/claude-sonnet-4",
+        "model": "github_copilot/claude-haiku-4.5",
         "token_env": None,
     },
     "github": {

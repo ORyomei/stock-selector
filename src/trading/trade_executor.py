@@ -87,7 +87,7 @@ class TradeExecutor:
                 return result
 
             # 4. 注文生成
-            order = self.order_manager.generate_order(signal, current_balance)
+            order = self.order_manager.generate_order(signal, current_balance, current_positions)
             if order is None:
                 result["reason"] = "Order generation failed"
                 return result

@@ -30,8 +30,11 @@ from infra.container import get_container
 def load_watchlist() -> list[dict]:
     """ウォッチリスト読み込み"""
     container = get_container()
-    cfg = container.config_repo().load_watchlist()
-    return cfg.get("watchlist", [])
+    data = container.config_repo().load_watchlist()
+    # config_repo returns list directly; handle both formats for safety
+    if isinstance(data, dict):
+        return data.get("watchlist", [])
+    return data
 
 
 def load_portfolio() -> dict[str, Any]:

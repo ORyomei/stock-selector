@@ -52,8 +52,24 @@ def load_risk_limits() -> dict[str, Any]:
     return get_container().config_repo().load_risk_limits()
 
 
-def load_or_create_broker(config: dict) -> BrokerSimulator:
-    """BrokerSimulator を生成・復元"""
+def load_or_create_broker(config: dict):
+    """設定の "broker" に応じてブローカーを生成・復元する。
+
+    "simulator" (default): BrokerSimulator (仮想売買)
+    "kabu": KabuStationBroker (auカブコム kabuステーション API)
+    """
+    broker_name = (config.get("broker") or "simulator").lower()
+
+    if broker_name == "kabu":
+        from trading.brokers import KabuStationBroker
+
+        broker = KabuStationBroker(config["kabu"])
+        # 接続確認
+        broker.sync_from_broker()
+        print(f"✅ kabuステーション API 接続成功 (sandbox={config['kabu'].get('sandbox', False)})")
+        return broker
+
+    # default: simulator
     broker = BrokerSimulator(config["simulator"])
     portfolio_repo = get_container().portfolio()
     portfolio_data = portfolio_repo.load()
@@ -65,11 +81,15 @@ def load_or_create_broker(config: dict) -> BrokerSimulator:
     return broker
 
 
-def save_broker_state(broker: BrokerSimulator) -> None:
-    """BrokerSimulator の状態を portfolio.json に保存"""
-    portfolio_data = broker.to_dict()
-    get_container().portfolio().save(portfolio_data)
-    print("💾 ポートフォリオ保存完了")
+def save_broker_state(broker) -> None:
+    """ブローカー状態を保存。BrokerSimulator のみ portfolio.json に永続化する。"""
+    if isinstance(broker, BrokerSimulator):
+        portfolio_data = broker.to_dict()
+        get_container().portfolio().save(portfolio_data)
+        print("💾 ポートフォリオ保存完了")
+    else:
+        # 実取引ブローカーは証券会社側が真実なので保存不要
+        print("💾 実取引ブローカーのため、ローカル保存はスキップ")
 
 
 def _normalize_action(raw: str) -> TradeAction:

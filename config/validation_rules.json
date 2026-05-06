@@ -1,0 +1,96 @@
+{
+  "description": "Counterargument gate rules for signal validation",
+  "version": "1.0",
+  "validation_rules": {
+    "rsi_extreme": {
+      "enabled": true,
+      "description": "RSI が極端な値 (>80 or <20) の場合の検証",
+      "threshold_high": 80,
+      "threshold_low": 20,
+      "requirement": "fail_conditions に『RSI逆張り失敗』が記載されていることを確認"
+    },
+    "macd_divergence": {
+      "enabled": true,
+      "description": "MACD ダイバージェンス検出時の検証",
+      "requirement": "fail_conditions に『MACD乖離からの反発リスク』が記載されていることを確認"
+    },
+    "volume_warning": {
+      "enabled": true,
+      "description": "出来高が異常に低い場合の検証",
+      "volume_threshold_pct": 30,
+      "requirement": "fail_conditions に『出来高不足でのスリップ』が記載されていることを確認"
+    },
+    "macro_risk_off": {
+      "enabled": true,
+      "description": "マクロ環境が risk_off の場合のゲート",
+      "macro_score_threshold": -20,
+      "requirement": "market_environment が 'risk_off' の場合は invalidation_conditions に『マクロリスク中は様子見』が含まれることを確認"
+    },
+    "concentration_limit": {
+      "enabled": true,
+      "description": "同一セクター集中度チェック",
+      "max_sector_pct": 25,
+      "requirement": "invalidation_conditions に『セクター集中警告』が記載されている場合"
+    },
+    "trend_validation": {
+      "enabled": true,
+      "description": "トレンド方向とシグナル方向の一致性チェック",
+      "requirement": "fail_conditions に『トレンド反対方向の逆張り』が記載されていることを確認"
+    }
+  },
+  "required_fields_in_signal": {
+    "fail_conditions": {
+      "type": "array",
+      "min_items": 1,
+      "description": "シグナルが失敗する可能性のある条件を3点以上記載",
+      "example": [
+        "RSI逆張り失敗 (現在RSI=75, 過去10日高点更新の可能性)",
+        "MACD乖離からの反発リスク (MACD乖離が中期的に修正される)",
+        "出来高不足でのスリップ (平均出来高比30%以下の可能性)"
+      ]
+    },
+    "invalidation_conditions": {
+      "type": "array",
+      "min_items": 1,
+      "description": "シグナルを無効化する条件を2点以上記載",
+      "example": [
+        "マクロリスク中は様子見 (VIX>25 の場合は買い控え)",
+        "セクター集中警告 (テック比率既に20%, 更に+5%で過集中)"
+      ]
+    },
+    "exit_plan": {
+      "type": "string",
+      "description": "撤退・手仕舞い条件を簡潔に記載",
+      "example": "逆指値 168.0 で損切り、もしくは +5% で利確"
+    }
+  },
+  "regeneration_policy": {
+    "max_retries": 2,
+    "retry_strategy": "diff_request",
+    "description": "LLM からのシグナル JSON に必須フィールドが不足した場合の対応",
+    "diff_request_prompt": "以下の missing_fields だけを追加・修正して JSON を返してください。その他のフィールドは変更しないでください。",
+    "missing_fields_to_report": [
+      "fail_conditions",
+      "invalidation_conditions",
+      "exit_plan"
+    ],
+    "fallback_on_failure": "no_trade"
+  },
+  "scoring_thresholds": {
+    "strict_mode": {
+      "description": "リスクオフ時の厳格モード",
+      "min_fail_conditions_items": 3,
+      "min_invalidation_conditions_items": 2
+    },
+    "normal_mode": {
+      "description": "通常モード",
+      "min_fail_conditions_items": 1,
+      "min_invalidation_conditions_items": 1
+    },
+    "aggressive_mode": {
+      "description": "リスクオン時の積極モード",
+      "min_fail_conditions_items": 1,
+      "min_invalidation_conditions_items": 0
+    }
+  }
+}

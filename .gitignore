@@ -31,3 +31,5 @@ portfolio.json
 Thumbs.db
 
 diary/
+*.bak_*
+TODO.md

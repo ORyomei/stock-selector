@@ -587,34 +587,76 @@ def main() -> None:
     parser.add_argument("--min-score", type=int, default=10)
     parser.add_argument("--max-signals", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--ai", action="store_true", help="AI判断を有効化")
+    parser.add_argument("--ai", action="store_true", help="AI判断を有効化（legacyモード用）")
     parser.add_argument("--ai-provider", choices=PROVIDER_NAMES, default="copilot")
     parser.add_argument("--ai-model", default=None)
     parser.add_argument("--daemon", action="store_true")
     parser.add_argument("--interval", type=int, default=1800, help="seconds between cycles")
+    parser.add_argument("--legacy", action="store_true", help="旧パイプラインを使用（LangGraphなし）")
     args = parser.parse_args()
 
-    if args.daemon:
-        daemon_loop(
-            args.market,
-            args.min_score,
-            args.max_signals,
-            args.interval,
-            args.dry_run,
-            args.ai,
-            args.ai_provider,
-            args.ai_model,
-        )
+    if args.legacy:
+        # Legacy fixed-pipeline mode
+        if args.daemon:
+            daemon_loop(
+                args.market,
+                args.min_score,
+                args.max_signals,
+                args.interval,
+                args.dry_run,
+                args.ai,
+                args.ai_provider,
+                args.ai_model,
+            )
+        else:
+            run_cycle(
+                args.market,
+                args.min_score,
+                args.max_signals,
+                args.dry_run,
+                args.ai,
+                args.ai_provider,
+                args.ai_model,
+            )
     else:
-        run_cycle(
-            args.market,
-            args.min_score,
-            args.max_signals,
-            args.dry_run,
-            args.ai,
-            args.ai_provider,
-            args.ai_model,
-        )
+        # LangGraph agent mode (default)
+        from lib.graph_trade import run_trade_graph
+
+        if args.daemon:
+            print(f"デーモンモード (LangGraph): {args.interval}s ごとに自動実行")
+            print(f"  market={args.market}  min_score={args.min_score}  dry_run={args.dry_run}")
+            print(f"  provider={args.ai_provider}")
+            print("  Ctrl+C で停止\n")
+            cycle = 0
+            while True:
+                cycle += 1
+                print(f"\n### サイクル #{cycle} ###")
+                try:
+                    run_trade_graph(
+                        market=args.market,
+                        min_score=args.min_score,
+                        max_signals=args.max_signals,
+                        dry_run=args.dry_run,
+                        provider=args.ai_provider,
+                        model=args.ai_model,
+                    )
+                except Exception as e:
+                    print(f"ERROR: {e}", file=sys.stderr)
+                print(f"\n次回: {args.interval}s後")
+                try:
+                    time.sleep(args.interval)
+                except KeyboardInterrupt:
+                    print("\nデーモン停止")
+                    break
+        else:
+            run_trade_graph(
+                market=args.market,
+                min_score=args.min_score,
+                max_signals=args.max_signals,
+                dry_run=args.dry_run,
+                provider=args.ai_provider,
+                model=args.ai_model,
+            )
 
 
 if __name__ == "__main__":

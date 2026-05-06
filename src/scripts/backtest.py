@@ -115,10 +115,6 @@ def main():
     parser.add_argument("--ticker", type=str, default=None, help="特定銘柄のみ検証")
     args = parser.parse_args()
 
-    if not DB_PATH.exists():
-        print("ERROR: データベースが見つかりません", file=sys.stderr)
-        sys.exit(1)
-
     analyses = get_past_analyses(
         min_score=args.min_score if args.min_score > 0 else None,
         ticker=args.ticker,
