@@ -29,17 +29,19 @@ LangGraph ReAct Agent が**市場スキャン → 多角的分析 → 売買判�
           └────────────┬────────────┘
                        │
           ┌────────────▼────────────┐
-          │   BrokerSimulator       │  → portfolio.json に永続化
-          │   (将来: 実ブローカー)   │  → diary/ にログ保存
+          │   Broker (Sim / kabu)   │  → portfolio.json に永続化
+          │   シミュレーター or 実API │  → diary/ にログ保存
           └─────────────────────────┘
 ```
 
 ### 自動売買サイクルの流れ
 
 1. **自動クローズ判定**（非 LLM）— 損切り・利確・トレーリングストップ・最大保有日数到達のチェック
-2. **ReAct Agent 起動** — ポートフォリオ状況・リスク設定をプロンプトに注入し、LLM がツールを自律的に呼び出して市場分析
-3. **シグナル抽出**（非 LLM）— AI 出力から JSON シグナルをパース。失敗時はフォローアップで構造化出力を再要求
-4. **注文実行**（非 LLM）— RiskManager で検証後、シミュレーターで約定。ポジション枠満杯時は自動で入れ替え（swap）モードに移行
+1.5. **市場シナリオ判定** — マクロ指標からリスクオン/ニュートラル/リスクオフを判定し、シナリオ別プロンプトを選択
+2. **ReAct Agent 起動** — ポートフォリオ状況・リスク設定・シナリオをプロンプトに注入し、LLM がツールを自律的に呼び出して市場分析（180秒タイムアウト付き）
+3. **シグナル抽出**（非 LLM）— AI 出力から JSON シグナルをパース。失敗時はフォローアップで構造化出力を再要求。**ユニバース外ティッカーは自動却下**
+3.5. **反証ゲート**（非 LLM）— シグナルの必須フィールド・市場環境整合性を検証し、不適格シグナルを却下
+4. **注文実行**（非 LLM）— RiskManager で検証後、成行注文で約定。ポジション枠満杯時は自動で入れ替え（swap）モードに移行
 
 > 売買の最終実行は LLM の外で行い、安全性を確保している。
 
@@ -295,7 +297,7 @@ LiteLLM 経由で複数プロバイダーに対応。デフォルトは Copilot�
 
 | プロバイダー | モデル | API キー |
 |---|---|---|
-| `copilot`（デフォルト） | `claude-sonnet-4` | 不要（Copilot トークン） |
+| `copilot`（デフォルト） | `claude-haiku-4.5` | 不要（Copilot トークン） |
 | `github` | `gpt-4o` | 不要 |
 | `openai` | `gpt-4o` | `OPENAI_API_KEY` |
 | `anthropic` | `claude-sonnet-4` | `ANTHROPIC_API_KEY` |
@@ -414,6 +416,8 @@ stock-selector/
 │   ├── trading/                     # 売買エンジン
 │   │   ├── broker_interface.py      #   ブローカー抽象インターフェース
 │   │   ├── simulator.py             #   仮想ブローカー（シミュレーター）
+│   │   ├── brokers/
+│   │   │   └── kabu_station.py      #   auカブコム kabuステーション API
 │   │   ├── order_manager.py         #   注文管理
 │   │   ├── risk_manager.py          #   リスク管理
 │   │   └── trade_executor.py        #   売買実行オーケストレーター
@@ -421,7 +425,9 @@ stock-selector/
 ├── config/
 │   ├── watchlist.json               # 監視銘柄リスト
 │   ├── risk_limits.json             # リスク管理パラメータ
-│   └── trading_config.json          # 売買設定
+│   ├── trading_config.json          # 売買設定（ブローカー切替）
+│   ├── prompt_scenarios.json        # シナリオ別プロンプト設定
+│   └── validation_rules.json        # シグナルバリデーションルール
 ├── diary/                           # 分析・売買の全記録
 │   ├── signals/                     #   AI 生成シグナル (JSON)
 │   └── trades/                      #   約定記録
@@ -446,5 +452,5 @@ uv run pytest                        # テスト
 ## 注意事項
 
 - **投資助言ではない** — 出力は参考情報であり、投資判断の責任はユーザーにある
-- **現在は仮想売買のみ** — 実ブローカー接続は `trading_config.json` の `mode` で切り替え可能な設計だが、現時点ではシミュレーターのみ
+- **ブローカー切替可能** — `trading_config.json` の `broker` で `"simulator"` / `"kabu"` を切り替え。kabuステーション API 接続は `KABU_API_PASSWORD` 環境変数が必要
 - API キーは `.env` で管理（`.gitignore` に含まれる）
