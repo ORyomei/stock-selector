@@ -8,7 +8,6 @@ RSI, MACD, ボリンジャーバンド, SMA/EMA 等を計算して出力する�
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -108,15 +107,3 @@ def analyze(ticker: str, period: str = "6mo"):
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
-
-
-def main():
-    parser = argparse.ArgumentParser(description="テクニカル指標算出")
-    parser.add_argument("ticker", help="ティッカーシンボル (例: 7203.T, AAPL)")
-    parser.add_argument("--period", default="6mo", help="分析期間")
-    args = parser.parse_args()
-    analyze(args.ticker, args.period)
-
-
-if __name__ == "__main__":
-    main()

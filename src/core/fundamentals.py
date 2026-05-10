@@ -8,7 +8,6 @@ yfinance から決算データ・財務諸表を取得し、成長性・収益�
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -229,14 +228,3 @@ def analyze_fundamentals(ticker: str):
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
-
-
-def main():
-    parser = argparse.ArgumentParser(description="ファンダメンタル分析")
-    parser.add_argument("ticker", help="ティッカーシンボル (例: 7203.T, AAPL)")
-    args = parser.parse_args()
-    analyze_fundamentals(args.ticker)
-
-
-if __name__ == "__main__":
-    main()

@@ -16,8 +16,8 @@ from langgraph.prebuilt import create_react_agent
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from scripts.lib.llm import get_chat_model
-from scripts.lib.tools import ALL_TOOLS
+from agents.llm import get_chat_model
+from agents.tools import ALL_TOOLS
 
 from infra.container import get_container
 

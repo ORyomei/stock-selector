@@ -1971,7 +1971,7 @@ wheels = [
 [[package]]
 name = "stock-selector"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "dependency-injector" },
     { name = "feedparser" },
@@ -1982,6 +1982,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "ta" },
+    { name = "typer" },
     { name = "yfinance" },
 ]
 
@@ -2003,6 +2004,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "requests", specifier = ">=2.31" },
     { name = "ta", specifier = ">=0.11.0" },
+    { name = "typer", specifier = ">=0.23.1" },
     { name = "yfinance", specifier = ">=0.2.36" },
 ]
 

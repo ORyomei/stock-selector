@@ -13,7 +13,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import time
@@ -613,33 +612,3 @@ def run(query: str | None = None, lang: str | None = None, limit: int = 8) -> di
     result["queries_used"] = [q[1] for q in queries]
 
     return result
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="イベント因果分析 — ニュースから株価への波及を予測",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python3 scripts/event_impact_analyzer.py
-  python3 scripts/event_impact_analyzer.py --query "トランプ イラン 攻撃"
-  python3 scripts/event_impact_analyzer.py --query "fed rate cut" --lang en
-  python3 scripts/event_impact_analyzer.py --limit 20
-        """,
-    )
-    parser.add_argument("--query", type=str, default=None, help="分析する特定のイベント・クエリ")
-    parser.add_argument("--lang", type=str, default=None, choices=["ja", "en"], help="ニュース言語")
-    parser.add_argument("--limit", type=int, default=8, help="1クエリあたりの最大取得件数")
-    parser.add_argument("--format", choices=["json", "text"], default="json", help="出力形式")
-    args = parser.parse_args()
-
-    result = run(query=args.query, lang=args.lang, limit=args.limit)
-
-    if args.format == "text":
-        print(format_causal_summary(result))
-    else:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    main()

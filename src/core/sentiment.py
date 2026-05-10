@@ -9,7 +9,6 @@ Google News の日本語・英語両方のヘッドラインを統合して分�
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import sys
@@ -240,26 +239,3 @@ def run_sentiment(query: str, limit: int = 20) -> dict[str, Any] | None:
     result["query"] = query
     result["source"] = "google_news_headlines"
     return result
-
-
-def main():
-    parser = argparse.ArgumentParser(description="センチメント分析")
-    parser.add_argument("query", help="検索クエリ")
-    parser.add_argument("--limit", type=int, default=20, help="各言語の取得件数")
-    args = parser.parse_args()
-
-    texts = fetch_from_news(args.query, args.limit)
-
-    if not texts:
-        print(f"テキストが取得できませんでした: {args.query}", file=sys.stderr)
-        sys.exit(1)
-
-    result = analyze_sentiment(texts)
-    result["query"] = args.query
-    result["source"] = "google_news_headlines"
-
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    main()

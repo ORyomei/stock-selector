@@ -36,8 +36,8 @@ JST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(SRC_DIR))
 from infra.container import get_container
-from lib.ai import PROVIDER_NAMES, call_ai  # noqa: E402
-from lib.runner import run_script  # noqa: E402
+from agents.ai import PROVIDER_NAMES, call_ai  # noqa: E402
+from agents.runner import run_script  # noqa: E402
 
 # --- constants ------------------------------------------------------------
 
@@ -585,7 +585,7 @@ def main() -> None:
             run_analysis(args.market, args.span, args.depth, args.ai, args.ai_provider, args.ai_model)
     else:
         # LangGraph agent mode (default)
-        from lib.graph_analyze import run_analyze_graph
+        from agents.graph_analyze import run_analyze_graph
 
         if args.daemon:
             print(f"デーモンモード (LangGraph): {args.interval}秒ごとに自動実行")

@@ -13,10 +13,10 @@ SQLite の analyses テーブルから過去の推奨を取得し、
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 SRC_DIR = Path(__file__).resolve().parent.parent
 PROJECT_DIR = SRC_DIR.parent
@@ -108,104 +108,28 @@ def verify_recommendation(rec: dict, days: int) -> dict | None:
         return None
 
 
-def main():
-    parser = argparse.ArgumentParser(description="バックテスト・推奨検証")
-    parser.add_argument("--days", type=int, default=5, help="検証期間（日数）")
-    parser.add_argument("--min-score", type=int, default=0, help="最小スコア絶対値")
-    parser.add_argument("--ticker", type=str, default=None, help="特定銘柄のみ検証")
-    args = parser.parse_args()
-
-    analyses = get_past_analyses(
-        min_score=args.min_score if args.min_score > 0 else None,
-        ticker=args.ticker,
-    )
-
-    if not analyses:
-        print("検証対象のデータがありません", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"検証中... {len(analyses)} 件の推奨を {args.days} 日後と比較", file=sys.stderr)
-
+def run_backtest(
+    days: int = 5, min_score: int = 0, ticker: str | None = None
+) -> dict[str, Any]:
+    """バックテストを実行して集計結果を返す。"""
+    analyses = get_past_analyses(min_score=min_score or None, ticker=ticker)
     results = []
     for rec in analyses:
-        v = verify_recommendation(rec, args.days)
-        if v:
-            results.append(v)
+        verified = verify_recommendation(rec, days)
+        if verified:
+            results.append(verified)
 
     if not results:
-        print("検証可能なデータがありませんでした（推奨日からの日数不足の可能性）", file=sys.stderr)
-        sys.exit(1)
+        return {"summary": {"total": 0}, "details": []}
 
-    # ---- 統計サマリー ----
-    total = len(results)
-    correct_count = sum(1 for r in results if r["correct"])
-    accuracy = round(correct_count / total * 100, 1) if total > 0 else 0
-
-    buy_results = [r for r in results if r["direction"] == "買い"]
-    sell_results = [r for r in results if r["direction"] == "売り"]
-
-    buy_accuracy = (
-        round(sum(1 for r in buy_results if r["correct"]) / len(buy_results) * 100, 1)
-        if buy_results
-        else None
-    )
-    sell_accuracy = (
-        round(sum(1 for r in sell_results if r["correct"]) / len(sell_results) * 100, 1)
-        if sell_results
-        else None
-    )
-
-    avg_return = round(sum(r["return_pct"] for r in results) / total, 2) if total > 0 else 0
-
-    # スコア帯別の的中率
-    score_bands = {}
-    for r in results:
-        abs_score = abs(r["score"])
-        if abs_score >= 30:
-            band = "30+"
-        elif abs_score >= 20:
-            band = "20-29"
-        elif abs_score >= 10:
-            band = "10-19"
-        else:
-            band = "0-9"
-
-        if band not in score_bands:
-            score_bands[band] = {"total": 0, "correct": 0, "returns": []}
-        score_bands[band]["total"] += 1
-        if r["correct"]:
-            score_bands[band]["correct"] += 1
-        score_bands[band]["returns"].append(r["return_pct"])
-
-    band_stats = {}
-    for band, data in sorted(score_bands.items()):
-        band_stats[band] = {
-            "total": data["total"],
-            "correct": data["correct"],
-            "accuracy": round(data["correct"] / data["total"] * 100, 1) if data["total"] > 0 else 0,
-            "avg_return": round(sum(data["returns"]) / len(data["returns"]), 2)
-            if data["returns"]
-            else 0,
-        }
-
+    correct = sum(1 for r in results if r["correct"])
+    returns = [r["return_pct"] for r in results]
     summary = {
-        "verification_period_days": args.days,
-        "total_recommendations": total,
-        "verified": len(results),
-        "overall_accuracy": f"{accuracy}%",
-        "avg_return": f"{avg_return}%",
-        "buy_accuracy": f"{buy_accuracy}%" if buy_accuracy is not None else "N/A",
-        "sell_accuracy": f"{sell_accuracy}%" if sell_accuracy is not None else "N/A",
-        "by_score_band": band_stats,
+        "total": len(results),
+        "correct": correct,
+        "accuracy": round(correct / len(results) * 100, 1),
+        "avg_return": round(sum(returns) / len(returns), 2),
+        "max_return": round(max(returns), 2),
+        "min_return": round(min(returns), 2),
     }
-
-    output = {
-        "summary": summary,
-        "details": results,
-    }
-
-    print(json.dumps(output, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    main()
+    return {"summary": summary, "details": results}

@@ -42,7 +42,7 @@ def _safe(fn, *a, **kw) -> dict[str, Any]:
 def check_macro() -> dict[str, Any]:
     """マクロ経済指標を取得。VIX・米10年金利・ドル円・原油・金・主要株価指数の現在値と変化率、
     市場環境スコア（リスクオン/オフ判定）を返す。分析の最初に呼んで市場全体の状況を把握する。"""
-    from scripts.macro import fetch_macro
+    from core.macro import fetch_macro
     return _safe(fetch_macro)
 
 
@@ -58,7 +58,7 @@ def screen_stocks(
     strategy: 'oversold'(売られすぎ) / 'momentum'(モメンタム) / 'breakout'(ブレイクアウト) / 'value'(バリュー) / 'all'
     top: 各戦略の上位N件
     universe_size: 'default' / 'expanded'(S&P500+日経225全銘柄)"""
-    from scripts.screener import run_screen
+    from core.screener import run_screen
     return _safe(run_screen, market=market, strategy=strategy, top=top, universe_size=universe_size)
 
 
@@ -68,7 +68,7 @@ def score_stock(ticker: str, period: str = "6mo") -> dict[str, Any]:
     総合スコア、上昇確率、目標価格、エントリーポイント、損切り/利確ラインを返す。
     ticker: ティッカーシンボル (例: AAPL, 7203.T)
     period: 分析期間 (例: 3mo, 6mo, 1y)"""
-    from scripts.scorer import compute_score
+    from core.scorer import compute_score
     return _safe(compute_score, ticker, period)
 
 
@@ -77,7 +77,7 @@ def analyze_fundamentals(ticker: str) -> dict[str, Any]:
     """銘柄のファンダメンタル分析。PER/PBR/ROE/売上成長率/負債比率/FCF/配当/アナリスト予想/
     決算サプライズを取得し、ファンダメンタルスコア（最大70点）を返す。
     ticker: ティッカーシンボル (例: AAPL, 7203.T)"""
-    from scripts.fundamentals import analyze_fundamentals as _analyze
+    from core.fundamentals import analyze_fundamentals as _analyze
     return _safe(_analyze, ticker)
 
 
@@ -87,7 +87,7 @@ def check_sentiment(query: str, limit: int = 20) -> dict[str, Any]:
     ポジティブ/ネガティブ/ニュートラルの割合と平均スコア(-1〜+1)を返す。
     query: 検索クエリ (企業名やティッカー)
     limit: 取得ヘッドライン数"""
-    from scripts.fetch_sentiment import run_sentiment
+    from core.sentiment import run_sentiment
     result = _safe(run_sentiment, query, limit)
     if result is None:
         return {"error": "センチメントデータが取得できませんでした"}
@@ -105,7 +105,7 @@ def analyze_events(
     query: 検索クエリ (Noneで自動マクロクエリ)
     lang: 言語 ('ja'/'en'/None)
     limit: 記事数"""
-    from scripts.event_impact_analyzer import run as run_event
+    from core.event_impact import run as run_event
     return _safe(run_event, query, lang, limit)
 
 
@@ -115,7 +115,7 @@ def get_technical(ticker: str, period: str = "6mo") -> dict[str, Any]:
     テクニカルシグナル（ゴールデンクロス等）を返す。score_stock より軽量。
     ticker: ティッカーシンボル
     period: 分析期間"""
-    from scripts.technical import analyze
+    from core.technical import analyze
     return _safe(analyze, ticker, period)
 
 
@@ -126,7 +126,7 @@ def get_news(query: str, lang: str = "ja", limit: int = 10) -> dict[str, Any]:
     query: 検索クエリ
     lang: 言語 ('ja'/'en')
     limit: 取得件数"""
-    from scripts.fetch_news import fetch_news
+    from core.news import fetch_news
     return _safe(fetch_news, query, lang, limit)
 
 
@@ -136,7 +136,7 @@ def get_prices(ticker: str, period: str = "3mo") -> dict[str, Any]:
     配当利回り・52週高値/安値を返す。
     ticker: ティッカーシンボル
     period: 取得期間 (1d,5d,1mo,3mo,6mo,1y)"""
-    from scripts.fetch_prices import fetch
+    from core.prices import fetch
     return _safe(fetch, ticker, period)
 
 

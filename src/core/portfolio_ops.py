@@ -12,7 +12,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from datetime import datetime
@@ -291,20 +290,14 @@ def cmd_status(portfolio: dict):
             }
         )
 
-    print(
-        json.dumps(
-            {
-                "cash_jpy": round(portfolio["cash_jpy"], 0),
-                "cash_usd": round(portfolio["cash_usd"], 2),
-                "total_value_jpy": round(total_value_jpy, 0),
-                "total_value_usd": round(total_value_usd, 2),
-                "holdings": holdings_detail,
-                "trade_count": len(portfolio.get("history", [])),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
+    return {
+        "cash_jpy": round(portfolio["cash_jpy"], 0),
+        "cash_usd": round(portfolio["cash_usd"], 2),
+        "total_value_jpy": round(total_value_jpy, 0),
+        "total_value_usd": round(total_value_usd, 2),
+        "holdings": holdings_detail,
+        "trade_count": len(portfolio.get("history", [])),
+    }
 
 
 def cmd_performance(portfolio: dict):
@@ -313,8 +306,7 @@ def cmd_performance(portfolio: dict):
     sells = [h for h in history if h["type"] == "sell"]
 
     if not sells:
-        print(json.dumps({"message": "売却履歴がありません"}, ensure_ascii=False, indent=2))
-        return
+        return {"message": "売却履歴がありません"}
 
     total_pnl = sum(s.get("pnl", 0) for s in sells)
     wins = [s for s in sells if s.get("pnl", 0) > 0]
@@ -327,54 +319,14 @@ def cmd_performance(portfolio: dict):
         abs(sum(s["pnl"] for s in wins) / sum(s["pnl"] for s in losses)) if losses else float("inf")
     )
 
-    print(
-        json.dumps(
-            {
-                "total_trades": len(sells),
-                "wins": len(wins),
-                "losses": len(losses),
-                "win_rate": f"{win_rate:.1f}%",
-                "total_pnl": round(total_pnl, 2),
-                "avg_win": round(avg_win, 2),
-                "avg_loss": round(avg_loss, 2),
-                "profit_factor": round(profit_factor, 2),
-                "recent_trades": sells[-5:],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
-
-
-def main():
-    parser = argparse.ArgumentParser(description="ポートフォリオ管理")
-    parser.add_argument(
-        "command", choices=["status", "buy", "sell", "performance"], help="コマンド"
-    )
-    parser.add_argument("ticker", nargs="?", help="ティッカー（buy/sell時）")
-    parser.add_argument("shares", nargs="?", type=int, help="株数（buy/sell時）")
-    parser.add_argument("price", nargs="?", type=float, help="価格（buy/sell時）")
-    parser.add_argument("--stop-loss", type=float, default=None, help="損切りライン")
-    parser.add_argument("--take-profit", type=float, default=None, help="利確目標")
-    args = parser.parse_args()
-
-    portfolio = load_portfolio()
-
-    if args.command == "status":
-        cmd_status(portfolio)
-    elif args.command == "performance":
-        cmd_performance(portfolio)
-    elif args.command == "buy":
-        if not all([args.ticker, args.shares, args.price]):
-            print("ERROR: buy には ticker, shares, price が必要です", file=sys.stderr)
-            sys.exit(1)
-        cmd_buy(portfolio, args.ticker, args.shares, args.price, args.stop_loss, args.take_profit)
-    elif args.command == "sell":
-        if not all([args.ticker, args.shares, args.price]):
-            print("ERROR: sell には ticker, shares, price が必要です", file=sys.stderr)
-            sys.exit(1)
-        cmd_sell(portfolio, args.ticker, args.shares, args.price)
-
-
-if __name__ == "__main__":
-    main()
+    return {
+        "total_trades": len(sells),
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": f"{win_rate:.1f}%",
+        "total_pnl": round(total_pnl, 2),
+        "avg_win": round(avg_win, 2),
+        "avg_loss": round(avg_loss, 2),
+        "profit_factor": round(profit_factor, 2),
+        "recent_trades": sells[-5:],
+    }

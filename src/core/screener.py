@@ -19,7 +19,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import sys
@@ -664,36 +663,3 @@ def run_screen(
         "summary": summary,
         "results": output,
     }
-
-
-def main():
-    parser = argparse.ArgumentParser(description="株式スクリーナー")
-    parser.add_argument(
-        "--market", choices=["us", "jp", "all"], default="all", help="スキャン対象市場"
-    )
-    parser.add_argument(
-        "--strategy",
-        choices=["oversold", "momentum", "breakout", "value", "all"],
-        default="all",
-        help="スクリーニング戦略",
-    )
-    parser.add_argument("--top", type=int, default=5, help="各戦略の上位N件を表示")
-    parser.add_argument(
-        "--universe",
-        choices=["default", "expanded"],
-        default="default",
-        help="ユニバースサイズ (expanded: S&P500+日経225全銘柄)",
-    )
-    args = parser.parse_args()
-
-    final = run_screen(
-        market=args.market,
-        strategy=args.strategy,
-        top=args.top,
-        universe_size=args.universe,
-    )
-    print(json.dumps(final, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    main()

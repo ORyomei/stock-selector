@@ -12,7 +12,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -274,59 +273,32 @@ def check_portfolio_stops(portfolio: dict) -> list[dict]:
     return alerts
 
 
-def main():
-    parser = argparse.ArgumentParser(description="アラート・監視")
-    parser.add_argument("--ticker", type=str, default=None, help="特定銘柄のみチェック")
-    parser.add_argument(
-        "--check-portfolio", action="store_true", help="ポートフォリオの損切り/利確チェック"
-    )
-    args = parser.parse_args()
-
+def run_alert(
+    ticker: str | None = None, check_portfolio: bool = False
+) -> dict[str, Any]:
+    """アラートチェックを実行して結果を返す。"""
     results = []
+    total_alerts = 0
 
-    if args.check_portfolio:
+    if check_portfolio:
         portfolio = load_portfolio()
-        portfolio_alerts = check_portfolio_stops(portfolio)
-        if portfolio_alerts:
-            print(json.dumps({"portfolio_alerts": portfolio_alerts}, ensure_ascii=False, indent=2))
-        else:
-            print(
-                json.dumps(
-                    {"portfolio_alerts": [], "message": "アラートなし"},
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
-        return
+        stops = check_portfolio_stops(portfolio)
+        return {"portfolio_alerts": stops}
 
-    if args.ticker:
-        tickers = [args.ticker]
+    if ticker:
+        tickers = [ticker]
     else:
-        watchlist = load_watchlist()
-        tickers = [w["ticker"] for w in watchlist]
-        if not tickers:
-            print("ウォッチリストが空です", file=sys.stderr)
-            sys.exit(1)
+        wl = load_watchlist()
+        tickers = [w["ticker"] for w in wl]
 
-    print(f"チェック中... {len(tickers)} 銘柄", file=sys.stderr)
+    for t in tickers:
+        result = check_ticker(t)
+        if result:
+            results.append(result)
+            total_alerts += len(result.get("alerts", []))
 
-    for ticker in tickers:
-        r = check_ticker(ticker)
-        if r:
-            results.append(r)
-
-    # アラートがあるものを上に
-    results.sort(key=lambda x: x["alert_count"], reverse=True)
-
-    total_alerts = sum(r["alert_count"] for r in results)
-    output = {
+    return {
         "total_tickers": len(results),
         "total_alerts": total_alerts,
         "results": results,
     }
-
-    print(json.dumps(output, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    main()

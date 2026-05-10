@@ -4,77 +4,87 @@
 
 ## 基本動作
 
-1. ユーザーの指示を受けたら、必要な情報を `src/scripts/` 配下のスクリプトや CLI/Web 取得で収集する
-2. 特定銘柄の指定がなければ、**スクリーナー (`src/scripts/screener.py`) を使って市場全体から有望銘柄を自動発見**する
+1. ユーザーの指示を受けたら、CLI（`uv run stock-selector <command>`）や Web 取得で情報収集する
+2. 特定銘柄の指定がなければ、**スクリーナーで市場全体から有望銘柄を自動発見**する
 3. 収集した情報を総合的に分析し、売買判断を行う
 4. 結果を Chat で報告し、`diary/` に記録する
 
-## スクリプト実行環境
+## プロジェクト構成
 
-**スクリプトを実行する前に、必ず Python 仮想環境を有効化すること。**
-
-```bash
-cd /workspaces/stock-selector
-source .venv/bin/activate
+```
+src/
+  core/       ← ビジネスロジック（純粋関数）
+  agents/     ← LangGraph エージェント・デーモン
+  cli/        ← typer CLI エントリーポイント
+  trading/    ← 売買実行レイヤー
+  infra/      ← DI コンテナ・リポジトリ実装
+  interfaces/ ← 抽象インターフェース
 ```
 
-- システムの `python` コマンドは存在しない。**`python3`** を使用する
+## CLI 実行
+
+すべてのコマンドは `uv run stock-selector` で実行する。
+
+```bash
+# 銘柄スクリーニング
+uv run stock-selector screen --market jp --strategy all --top 10
+uv run stock-selector screen --market all --universe expanded
+
+# 個別銘柄分析
+uv run stock-selector score 7203.T
+uv run stock-selector technical 7203.T
+uv run stock-selector fundamentals 7203.T
+uv run stock-selector prices 7203.T
+uv run stock-selector news "トヨタ"
+uv run stock-selector sentiment "トヨタ"
+
+# マクロ・イベント
+uv run stock-selector macro
+uv run stock-selector event-impact --query "関税"
+
+# ポートフォリオ・トレード
+uv run stock-selector portfolio status
+uv run stock-selector portfolio performance
+uv run stock-selector trade --from-signal diary/signals/xxx.json
+uv run stock-selector alert --check-portfolio
+
+# バックテスト
+uv run stock-selector backtest --days 5
+
+# 自動売買デーモン
+uv run stock-selector auto-trade --market jp --daemon --interval 1800
+uv run stock-selector auto-analyze --market jp --ai --daemon
+```
+
+## 環境
+
 - 依存パッケージは `pyproject.toml` + `uv.lock` で管理（uv を使用）
 - `.venv` が未作成・壊れている場合は `uv sync` で再構築
 - パッケージ追加は `uv add <package>` を使用する
 
-### スクリプト実行例
+### 自律探索モード
 
-```bash
-source .venv/bin/activate
-python3 src/scripts/screener.py --market all --strategy all --top 10
-python3 src/scripts/scorer.py AAPL
-python3 src/scripts/fetch_news.py "NVIDIA"
-```
+ユーザーが特定の銘柄を指定しない場合（「なにか儲かりそうな株を探して」「おすすめ教えて」など）:
+1. まず `uv run stock-selector macro` で市場環境（リスクオン/オフ）を確認
+2. `uv run stock-selector screen --market all --strategy all` で全市場をスキャン
+3. 各戦略（売られすぎ・モメンタム・ブレイクアウト・バリュー）の上位候補を抽出
+4. 有望な候補に対して `uv run stock-selector score <ticker>` で詳細テクニカル分析
+5. `uv run stock-selector fundamentals <ticker>` でファンダメンタル評価
+6. ニュース・センチメントも確認して総合判断
+7. 過去の推奨精度を `uv run stock-selector backtest` で確認し、信頼性を付記
 
-## 情報収集の手段
+### 定期チェックモード
 
-### コアスクリプト
-- **銘柄発掘（スクリーナー）**: `python3 src/scripts/screener.py [--market us|jp|all] [--strategy oversold|momentum|breakout|value|all] [--top N] [--universe default|expanded]` で市場全体から有望銘柄を自動発見
-  - `--universe expanded` で S&P500 + 日経225 の拡張ユニバース（約230銘柄）をスキャン
-- **株価**: `python3 src/scripts/fetch_prices.py <ticker>` で取得（リトライ付き）
-- **ニュース**: `python3 src/scripts/fetch_news.py <query>` で取得（リトライ付き）、または Web ページを直接フェッチ
-- **センチメント分析**: `python3 src/scripts/fetch_sentiment.py <query>` で重み付き辞書＋否定表現検出・日英両方のヘッドラインを統合分析
-- **テクニカル指標**: `python3 src/scripts/technical.py <ticker>` で算出
-- **総合スコアリング**: `python3 src/scripts/scorer.py <ticker>` で算出（確率・目標価格・エントリーポイント含む）
-
-### 新規追加スクリプト
-- **ファンダメンタル分析**: `python3 src/scripts/fundamentals.py <ticker>` で決算・財務諸表・バリュエーション・収益性・成長性・アナリスト予想・決算サプライズを総合評価（ファンダメンタルスコア付き）
-- **マクロ経済指標**: `python3 src/scripts/macro.py` で VIX・米10年金利・ドル円・原油・金・主要指数を取得。市場環境スコア（リスクオン/オフ）を算出
-- **バックテスト**: `python3 src/scripts/backtest.py [--days N] [--min-score N]` で過去の推奨を実際の値動きと比較し的中率を検証
-- **アラート・監視**: `python3 src/scripts/alert.py` でウォッチリスト銘柄の急変・テクニカルシグナルを検知。`--check-portfolio` でポートフォリオの損切り/利確チェック
-- **ポートフォリオ管理**: `python3 src/scripts/portfolio.py [status|buy|sell|performance]` で仮想売買の実行・損益追跡・パフォーマンス統計
-- **自動分析**: `python3 src/scripts/auto_analyze.py [--market us|jp|all] [--span short|swing|medium|all] [--depth quick|standard|detailed] [--daemon] [--interval 秒]` で定期的な自動スキャン+分析+レポート保存。`--daemon --interval 1800` で30分ごとに自動実行
-- **自動売買ループ**: `python3 src/scripts/auto_trade.py [--market us|jp|all] [--min-score N] [--max-signals N] [--dry-run] [--daemon] [--interval 秒]` でスクリーニング→スコアリング→シグナル生成→発注→クローズ判定を全自動実行。`--dry-run` で注文なしテスト、`--daemon --interval 1800` で30分ごとに自動売買
+市場オープン時には以下を実行:
+1. `uv run stock-selector alert` でウォッチリスト・ポートフォリオのアラートチェック
+2. `uv run stock-selector alert --check-portfolio` で保有銘柄の損切り/利確到達チェック
+3. `uv run stock-selector macro` で市場環境の変化を確認
 
 ### 外部情報源
 - **Web ページ取得**: `fetch_webpage` ツールでニュース記事本文・IR資料・決算短信を直接読み取り可能
 - **市場概況**: Yahoo!ファイナンス (https://finance.yahoo.co.jp/) をフェッチして日経平均・ダウ・為替・注目ランキング等を確認
 - **MCP (SQLite)**: 分析結果を `data/stock_analysis.db` に蓄積し、過去の判断パターンや銘柄情報を検索・集計
 - **MCP (Memory)**: 銘柄間の関連性や過去の判断から学んだパターンを知識グラフとして記憶
-
-### 自律探索モード
-
-ユーザーが特定の銘柄を指定しない場合（「なにか儲かりそうな株を探して」「おすすめ教えて」など）:
-1. まず `src/scripts/macro.py` で市場環境（リスクオン/オフ）を確認
-2. `src/scripts/screener.py --market all --strategy all` で全市場をスキャン
-3. 各戦略（売られすぎ・モメンタム・ブレイクアウト・バリュー）の上位候補を抽出
-4. 有望な候補に対して `src/scripts/scorer.py <ticker>` で詳細テクニカル分析
-5. `src/scripts/fundamentals.py <ticker>` でファンダメンタル評価
-6. ニュース・センチメントも確認して総合判断
-7. 過去の推奨精度を `src/scripts/backtest.py` で確認し、信頼性を付記
-
-### 定期チェックモード
-
-市場オープン時には以下を実行:
-1. `src/scripts/alert.py` でウォッチリスト・ポートフォリオのアラートチェック
-2. `src/scripts/alert.py --check-portfolio` で保有銘柄の損切り/利確到達チェック
-3. `src/scripts/macro.py` で市場環境の変化を確認
 
 ## 出力フォーマット
 
@@ -151,8 +161,8 @@ python3 src/scripts/fetch_news.py "NVIDIA"
 - **種別**: 売買判断 / テクニカル分析 / ニュース調査 / センチメント分析 / 市場概況 / ポートフォリオ管理
 
 ### 🔧 使用ツール
-- (実行したスクリプトやMCPツール名を列挙)
-- 例: `src/scripts/scorer.py NVDA`, `src/scripts/fetch_news.py "NVIDIA"`, `MCP fetch (Yahoo!ファイナンス)`, `MCP sqlite (過去分析検索)` など
+- (実行した CLI コマンドやツール名を列挙)
+- 例: `uv run stock-selector score NVDA`, `uv run stock-selector news "NVIDIA"`, `fetch_webpage (Yahoo!ファイナンス)`, `MCP sqlite (過去分析検索)` など
 
 ### 📚 参照情報
 - (分析に使った情報ソースとその概要を列挙)
@@ -167,7 +177,7 @@ python3 src/scripts/fetch_news.py "NVIDIA"
 **ヘッダの記載ルール:**
 - 「使用ツール」にはスクリプト実行コマンド（引数含む）、MCP ツール呼び出し、fetch_webpage の URL など、**実際に実行・呼び出したもの**をすべて書く
 - 「参照情報」には取得した情報の出典と要約を書く（ニュース記事タイトル、Webページ名、データの期間など）
-- ツールの実行結果が空・エラーだった場合もその旨を記録する（例: `src/scripts/fetch_sentiment.py "任天堂"` → ネガティブ記事が多くスコア -0.35）
+- ツールの実行結果が空・エラーだった場合もその旨を記録する（例: `uv run stock-selector sentiment "任天堂"` → ネガティブ記事が多くスコア -0.35）
 
 ### その他
 

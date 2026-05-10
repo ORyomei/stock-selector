@@ -41,15 +41,15 @@ JST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(SRC_DIR))
 from infra.container import get_container
-from lib.ai import PROVIDER_NAMES, call_ai, parse_ai_json  # noqa: E402
-from lib.portfolio import (  # noqa: E402
+from agents.ai import PROVIDER_NAMES, call_ai, parse_ai_json  # noqa: E402
+from agents.portfolio_helpers import (  # noqa: E402
     confidence_to_float,
     count_positions,
     get_held_positions,
     get_held_tickers,
     get_max_positions,
 )
-from lib.runner import run_script, run_trade_cmd  # noqa: E402
+from agents.runner import run_script, run_trade_cmd  # noqa: E402
 
 # --- constants ------------------------------------------------------------
 
@@ -620,7 +620,7 @@ def main() -> None:
             )
     else:
         # LangGraph agent mode (default)
-        from lib.graph_trade import run_trade_graph
+        from agents.graph_trade import run_trade_graph
 
         if args.daemon:
             print(f"デーモンモード (LangGraph): {args.interval}s ごとに自動実行")

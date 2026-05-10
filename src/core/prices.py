@@ -10,7 +10,6 @@ Usage: python scripts/fetch_prices.py <ticker> [--period 3mo] [--interval 1d]
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -59,20 +58,3 @@ def fetch(ticker: str, period: str = "3mo", interval: str = "1d"):
     recent = recent.round(2)
     print(recent.to_string())
     return summary
-
-
-def main():
-    parser = argparse.ArgumentParser(description="株価データ取得")
-    parser.add_argument("ticker", help="ティッカーシンボル (例: 7203.T, AAPL)")
-    parser.add_argument(
-        "--period", default="3mo", help="取得期間 (1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max)"
-    )
-    parser.add_argument(
-        "--interval", default="1d", help="間隔 (1m,2m,5m,15m,30m,60m,90m,1h,1d,5d,1wk,1mo,3mo)"
-    )
-    args = parser.parse_args()
-    fetch(args.ticker, args.period, args.interval)
-
-
-if __name__ == "__main__":
-    main()

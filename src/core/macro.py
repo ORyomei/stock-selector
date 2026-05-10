@@ -9,7 +9,6 @@ VIX, 米10年金利, ドル円, 原油先物, 金先物, 主要指数を取得�
 
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import sys
@@ -166,14 +165,3 @@ def fetch_macro(period: str = "3mo"):
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
-
-
-def main():
-    parser = argparse.ArgumentParser(description="マクロ経済指標")
-    parser.add_argument("--period", default="3mo", help="取得期間")
-    args = parser.parse_args()
-    fetch_macro(args.period)
-
-
-if __name__ == "__main__":
-    main()

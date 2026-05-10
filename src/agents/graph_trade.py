@@ -17,16 +17,16 @@ from langgraph.prebuilt import create_react_agent
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from scripts.lib.llm import get_chat_model
-from scripts.lib.portfolio import (
+from agents.llm import get_chat_model
+from agents.portfolio_helpers import (
     confidence_to_float,
     count_positions,
     get_held_positions,
     get_held_tickers,
     get_max_positions,
 )
-from scripts.lib.runner import run_trade_cmd
-from scripts.lib.tools import ALL_TOOLS
+from agents.runner import run_trade_cmd
+from agents.tools import ALL_TOOLS
 
 from infra.container import get_container
 
@@ -75,7 +75,7 @@ def _detect_scenario(macro_result: dict[str, Any] | None, scenarios_cfg: dict[st
 def _fetch_macro_safe() -> dict[str, Any] | None:
     """Fetch macro data without raising. Used for scenario routing."""
     try:
-        from scripts.macro import fetch_macro  # imported lazily to avoid slow startup
+        from core.macro import fetch_macro  # imported lazily to avoid slow startup
         import io
         import contextlib
 
@@ -448,8 +448,8 @@ def run_trade_graph(
 
 def _extract_signals(ai_text: str, max_signals: int) -> list[dict[str, Any]]:
     """Parse trading signals from the AI's final text output."""
-    from scripts.lib.ai import parse_ai_json
-    from scripts.screener import US_UNIVERSE, JP_UNIVERSE
+    from agents.ai import parse_ai_json
+    from core.screener import US_UNIVERSE, JP_UNIVERSE
 
     # スクリーナーのユニバースに含まれるティッカーのみ許可
     _valid_tickers = set(US_UNIVERSE + JP_UNIVERSE)
@@ -501,7 +501,7 @@ def _apply_counterargument_gate(
     silently block all trading due to a bug in the gate itself.
     """
     try:
-        from scripts.lib.decision_gates import validate_signals_batch
+        from agents.gates import validate_signals_batch
         return validate_signals_batch(signals, market_environment=market_environment)
     except Exception as e:
         print(f"⚠️  counterargument gate error (fail-open): {e}", file=sys.stderr)

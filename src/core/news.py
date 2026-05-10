@@ -8,7 +8,6 @@ Google News RSS を使ってニュースを取得する。
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -38,16 +37,3 @@ def fetch_news(query: str, lang: str = "ja", limit: int = 10):
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
-
-
-def main():
-    parser = argparse.ArgumentParser(description="ニュース取得")
-    parser.add_argument("query", help="検索クエリ")
-    parser.add_argument("--lang", default="ja", help="言語 (ja/en)")
-    parser.add_argument("--limit", type=int, default=10, help="取得件数")
-    args = parser.parse_args()
-    fetch_news(args.query, args.lang, args.limit)
-
-
-if __name__ == "__main__":
-    main()
