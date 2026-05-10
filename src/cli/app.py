@@ -282,7 +282,6 @@ def auto_trade(
             use_ai=ai,
             ai_provider=ai_provider,
             ai_model=ai_model,
-            use_legacy=legacy,
         )
     else:
         run_cycle(
@@ -321,7 +320,6 @@ def auto_analyze(
             use_ai=ai,
             ai_provider=ai_provider,
             ai_model=ai_model,
-            use_legacy=legacy,
         )
     else:
         run_analysis(
