@@ -241,4 +241,9 @@ class OrderManager:
 
         quantity = int(base_qty * avg_ratio)
 
+        # 日本株は100株単位（単元株）に丸める
+        if signal.ticker.endswith(".T"):
+            quantity = (quantity // 100) * 100
+            return max(100, quantity)
+
         return max(1, quantity)  # 最小 1 株

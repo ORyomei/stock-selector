@@ -97,6 +97,10 @@ class RiskManager:
         if max_affordable > 0:
             position_size = min(position_size, max_affordable)
 
+        # 日本株は100株単位（単元株）に丸める
+        if currency == "JPY":
+            position_size = (position_size // 100) * 100
+
         return position_size
 
     def check_daily_loss(self, total_pnl_today: float, total_balance: float) -> bool:
