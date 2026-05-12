@@ -572,19 +572,33 @@ def run_cycle(
         else:
             log("  AI判断失敗 -> ルールベースにフォールバック")
 
-    # Build signals
+    # Build signals (with cash check)
+    portfolio = get_container().portfolio()
+    remaining_cash = portfolio.get_balance().get("cash_jpy", 0) + portfolio.get_balance().get("cash_usd", 0) * 150
     signals: list[dict[str, Any]] = []
     for s in scored:
         if len(signals) >= max_signals or len(signals) >= available:
             break
         ticker = s["ticker"]
+
+        # 資金不足チェック: 100株分の資金がなければスキップ
+        price = s["current_price"]
+        min_cost = price * (100 if ticker.endswith(".T") else 1)
+        if min_cost > remaining_cash:
+            log(f"  💰 {ticker}: 資金不足 (必要≈¥{min_cost:,.0f}, 残高¥{remaining_cash:,.0f}) -> skip")
+            continue
+
         if use_ai and ai_decisions:
             ai_d = ai_decisions.get(ticker)
             if ai_d and ai_d.get("decision") == "skip":
                 log(f"  ⛔ {ticker}: AI skip -> シグナル除外")
                 continue
         reason = f"auto_trade{'[AI]' if use_ai else ''}: score={s['score']}, {s['action']}"
-        signals.append(_make_signal(s, reason))
+        sig = _make_signal(s, reason)
+        signals.append(sig)
+        # 残高を仮引き当て（次の銘柄の資金チェック用）
+        sig_cost = (sig["entry_price"] if sig["entry_price"] > 0 else price) * (100 if ticker.endswith(".T") else 1)
+        remaining_cash -= sig_cost
 
     # Step 6: execute
     log(f"\n注文実行 ({len(signals)} 件)...")
