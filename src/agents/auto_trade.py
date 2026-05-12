@@ -573,8 +573,9 @@ def run_cycle(
             log("  AI判断失敗 -> ルールベースにフォールバック")
 
     # Build signals (with cash check)
-    portfolio = get_container().portfolio()
-    remaining_cash = portfolio.get_balance().get("cash_jpy", 0) + portfolio.get_balance().get("cash_usd", 0) * 150
+    pf_data = get_container().portfolio().load() or {}
+    pf_balance = pf_data.get("balance", {})
+    remaining_cash = pf_balance.get("cash_jpy", 0) + pf_balance.get("cash_usd", 0) * 150
     signals: list[dict[str, Any]] = []
     for s in scored:
         if len(signals) >= max_signals or len(signals) >= available:
