@@ -540,9 +540,11 @@ def _execute_signals(
                     continue
                 executed.append({"ticker": sell_ticker, "status": "SOLD", "score": 0})
 
-        # Buy — 自動売買では成行注文を使用（指値だとスプレッドで未約定になるため）
+        # Buy — 推奨エントリー価格があれば指値、なければ成行
         buy_sig = {k: v for k, v in sig.items() if k != "sell_ticker"}
-        buy_sig["entry_price"] = 0  # force MARKET order
+        # entry_price > 0 なら指値注文（押し目待ち）、0 なら成行注文
+        if buy_sig.get("entry_price", 0) <= 0:
+            buy_sig["entry_price"] = 0  # MARKET order
         sig_name = f"{sig['ticker'].replace('.', '')}_auto.json"
         sig_path = diary.save_signal(sig_name, buy_sig)
         out, rc = run_trade_cmd(["--from-signal", sig_path])

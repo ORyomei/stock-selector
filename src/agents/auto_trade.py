@@ -62,6 +62,11 @@ MIN_SWAP_SCORE_DIFF_AI = 5
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
+# エントリータイミング最適化
+ENTRY_GAP_THRESHOLD = 0.01     # 推奨エントリーと現在値の乖離がこれ以上なら指値を使う
+SURGE_RETURN_THRESHOLD = 5.0   # 1日リターンがこれ(%)以上なら急騰とみなし指値を強制
+
+
 def score_ticker(ticker: str) -> dict[str, Any] | None:
     """Score a single ticker via ``scorer.py`` and return a summary dict."""
     scorer = run_script("scorer.py", [ticker])
@@ -80,6 +85,8 @@ def score_ticker(ticker: str) -> dict[str, Any] | None:
         "probability": scorer.get("probability", {}),
         "risk_management": scorer.get("risk_management", {}),
         "volatility": scorer.get("volatility", {}),
+        "entry_points": scorer.get("entry_points", []),
+        "returns": scorer.get("returns", {}),
     }
 
 
@@ -192,20 +199,68 @@ def _execute_signals(
         sig_path = diary.save_signal(sig_name, sig)
         out, rc = run_trade_cmd(["--from-signal", sig_path])
         ok = rc == 0 and "FILLED" in out
-        log(f"  {'✅' if ok else '❌'} {sig['ticker']} {'約定成功' if ok else '約定失敗'}")
+        if not ok:
+            log(f"  ❌ {sig['ticker']} 約定失敗: {out.strip()[:200]}")
+        else:
+            log(f"  ✅ {sig['ticker']} 約定成功")
         executed.append(
             {"ticker": sig["ticker"], "status": "FILLED" if ok else "FAILED", "score": sig["score"]}
         )
     return executed
 
 
+def _pick_entry_price(info: dict[str, Any]) -> float:
+    """スコアラーの推奨エントリー価格を活用して指値/成行を決定する。
+
+    急騰（1日リターン≧閾値）の場合は、乖離率に関係なく指値を強制する。
+    これにより「上がった後に一時的に下がる」パターンで押し目買いできる。
+
+    Returns:
+        0 = 成行注文 (market)
+        >0 = 指値注文 (limit) — 推奨押し目価格
+    """
+    price = info["current_price"]
+    entry_points = info.get("entry_points", [])
+    if not entry_points:
+        return 0
+
+    # "指値買い" の推奨エントリーを探す
+    limit_entry = next(
+        (ep["price"] for ep in entry_points if ep.get("type") == "指値買い"),
+        None,
+    )
+    if limit_entry is None or limit_entry <= 0:
+        return 0
+
+    # 急騰検知: 1日で大きく上がっていたら、乖離率に関係なく指値を強制
+    ret_1d = _parse_return_pct(info.get("returns", {}), "1日リターン")
+    if ret_1d >= SURGE_RETURN_THRESHOLD:
+        return limit_entry
+
+    # 通常: 現在値と推奨エントリーの乖離が閾値以上なら指値を使う
+    gap_ratio = (price - limit_entry) / price
+    if gap_ratio >= ENTRY_GAP_THRESHOLD:
+        return limit_entry
+    return 0
+
+
+def _parse_return_pct(returns: dict[str, str], key: str) -> float:
+    """Parse '6.85%' -> 6.85"""
+    val = returns.get(key, "0%")
+    try:
+        return float(val.replace("%", ""))
+    except (ValueError, AttributeError):
+        return 0.0
+
+
 def _make_signal(info: dict[str, Any], reason: str) -> dict[str, Any]:
     risk = info.get("risk_management", {})
     price = info["current_price"]
+    entry_price = _pick_entry_price(info)
     return {
         "ticker": info["ticker"],
         "action": "buy",
-        "entry_price": 0,
+        "entry_price": entry_price,
         "target_price": risk.get("利確目標1（ATR×2）", price * 1.05),
         "stop_loss_price": risk.get("損切りライン", price * 0.97),
         "take_profit_price": risk.get("利確目標2（ATR×4）", price * 1.10),
@@ -479,6 +534,10 @@ def run_cycle(
         result = score_ticker(ticker)
         if not result:
             continue
+        ret_1d = _parse_return_pct(result.get("returns", {}), "1日リターン")
+        if ret_1d >= SURGE_RETURN_THRESHOLD:
+            log(f"    📈 急騰検知 (1日+{ret_1d:.1f}%) → 指値注文を強制")
+
         log(f"    score={result['score']}, action={result['action']}, conf={result['confidence']}")
         if result["score"] < min_score:
             log("    スコア不足 -> skip")
