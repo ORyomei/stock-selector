@@ -284,9 +284,17 @@ def _run_swap_evaluation(
     ai_provider: str,
     ai_model: str | None,
     log: Any,
+    *,
+    pre_scored: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate whether to swap held positions with better candidates."""
+    """Evaluate whether to swap held positions with better candidates.
+
+    Args:
+        pre_scored: 既にスコアリング済みの候補。指定時は再スコアリングをスキップ。
+    """
     executed: list[dict[str, Any]] = []
+    if max_signals <= 0:
+        return executed
     positions = get_held_positions()
 
     # Score held positions
@@ -317,22 +325,26 @@ def _run_swap_evaluation(
             }
         held_scored.append(result)
 
-    # Score new candidates
-    log("\nStep 4b: 新規候補スコアリング...")
-    new_scored: list[dict[str, Any]] = []
-    for cand in candidates[: max_signals * 3]:
-        ticker = cand["ticker"]
-        log(f"  -> {ticker} ({cand.get('name', '')})...")
-        result = score_ticker(ticker)
-        if not result:
-            continue
-        result["name"] = cand.get("name", "")
-        log(f"    score={result['score']}, action={result['action']}")
-        if "売り" in result["action"]:
-            log(f"    判定が{result['action']} -> skip")
-            continue
-        new_scored.append(result)
-        log("    -> 候補 ✓")
+    # Score new candidates (skip if pre_scored provided)
+    if pre_scored:
+        new_scored = pre_scored
+        log(f"\n  スコア済み候補 {len(new_scored)} 銘柄を使用")
+    else:
+        log("\nStep 4b: 新規候補スコアリング...")
+        new_scored = []
+        for cand in candidates[: max_signals * 3]:
+            ticker = cand["ticker"]
+            log(f"  -> {ticker} ({cand.get('name', '')})...")
+            result = score_ticker(ticker)
+            if not result:
+                continue
+            result["name"] = cand.get("name", "")
+            log(f"    score={result['score']}, action={result['action']}")
+            if "売り" in result["action"]:
+                log(f"    判定が{result['action']} -> skip")
+                continue
+            new_scored.append(result)
+            log("    -> 候補 ✓")
 
     if not new_scored:
         log("  -> 入れ替え候補なし。")
@@ -504,16 +516,7 @@ def run_cycle(
     log(f"  -> 候補 {len(candidates)} 銘柄 (保有済み除外)")
     log(f"  -> ポジション: {cur_pos}/{max_pos} (空き: {available})")
 
-    # Full -> swap evaluation
-    if available <= 0 and candidates:
-        log("\n  枠満杯 -> 入れ替え検討モードへ")
-        executed = _run_swap_evaluation(
-            candidates, macro, market, max_signals, dry_run, use_ai, ai_provider, ai_model, log
-        )
-        _save_log(file_ts, lines, market, ai_used=use_ai)
-        return executed
-
-    if available <= 0:
+    if available <= 0 and not candidates:
         log("  -> 枠満杯 & 候補なし。")
         _save_log(file_ts, lines, market, ai_used=use_ai)
         return []
@@ -572,28 +575,32 @@ def run_cycle(
         else:
             log("  AI判断失敗 -> ルールベースにフォールバック")
 
-    # Build signals (with cash check)
+    # Build signals (with cash check → swap fallback)
     pf_data = get_container().portfolio().load() or {}
     pf_balance = pf_data.get("balance", {})
     remaining_cash = pf_balance.get("cash_jpy", 0) + pf_balance.get("cash_usd", 0) * 150
+    log(f"\n  残高: ¥{remaining_cash:,.0f}")
     signals: list[dict[str, Any]] = []
+    swap_candidates: list[dict[str, Any]] = []  # 資金不足で買えなかった良い候補
     for s in scored:
         if len(signals) >= max_signals or len(signals) >= available:
             break
         ticker = s["ticker"]
-
-        # 資金不足チェック: 100株分の資金がなければスキップ
-        price = s["current_price"]
-        min_cost = price * (100 if ticker.endswith(".T") else 1)
-        if min_cost > remaining_cash:
-            log(f"  💰 {ticker}: 資金不足 (必要≈¥{min_cost:,.0f}, 残高¥{remaining_cash:,.0f}) -> skip")
-            continue
 
         if use_ai and ai_decisions:
             ai_d = ai_decisions.get(ticker)
             if ai_d and ai_d.get("decision") == "skip":
                 log(f"  ⛔ {ticker}: AI skip -> シグナル除外")
                 continue
+
+        # 資金不足チェック: 100株分の資金がなければ swap 候補へ
+        price = s["current_price"]
+        min_cost = price * (100 if ticker.endswith(".T") else 1)
+        if min_cost > remaining_cash:
+            log(f"  💰 {ticker}: 資金不足 (必要≈¥{min_cost:,.0f}, 残高¥{remaining_cash:,.0f}) -> 入れ替え候補へ")
+            swap_candidates.append(s)
+            continue
+
         reason = f"auto_trade{'[AI]' if use_ai else ''}: score={s['score']}, {s['action']}"
         sig = _make_signal(s, reason)
         signals.append(sig)
@@ -601,9 +608,21 @@ def run_cycle(
         sig_cost = (sig["entry_price"] if sig["entry_price"] > 0 else price) * (100 if ticker.endswith(".T") else 1)
         remaining_cash -= sig_cost
 
-    # Step 6: execute
-    log(f"\n注文実行 ({len(signals)} 件)...")
-    executed = _execute_signals(signals, dry_run, log)
+    # Step 6: execute new buys
+    executed: list[dict[str, Any]] = []
+    if signals:
+        log(f"\n注文実行 ({len(signals)} 件)...")
+        executed = _execute_signals(signals, dry_run, log)
+
+    # Step 7: swap evaluation — 資金不足で買えなかった候補 vs 保有銘柄
+    if swap_candidates and cur_pos > 0:
+        log(f"\n入れ替え検討: {len(swap_candidates)} 銘柄が資金不足で買えず")
+        swap_executed = _run_swap_evaluation(
+            [],  # candidates not needed when pre_scored is provided
+            macro, market, max_signals - len(executed), dry_run, use_ai, ai_provider, ai_model, log,
+            pre_scored=swap_candidates,
+        )
+        executed.extend(swap_executed)
 
     log(f"\n{'=' * 60}")
     log(f"  サイクル完了: {datetime.now(JST):%H:%M:%S}")
