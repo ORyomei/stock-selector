@@ -209,20 +209,21 @@ def _execute_signals(
     return executed
 
 
-def _pick_entry_price(info: dict[str, Any]) -> float:
-    """スコアラーの推奨エントリー価格を活用して指値/成行を決定する。
+def _should_wait_for_pullback(info: dict[str, Any]) -> tuple[bool, float]:
+    """現在値がスコアラーの推奨エントリー価格より高すぎるなら、買いを見送る。
 
-    急騰（1日リターン≧閾値）の場合は、乖離率に関係なく指値を強制する。
-    これにより「上がった後に一時的に下がる」パターンで押し目買いできる。
+    シミュレーターが指値注文に対応していないため、
+    「指値で待つ」代わりに「現在値が推奨価格に近づくまで見送る」方式。
 
     Returns:
-        0 = 成行注文 (market)
-        >0 = 指値注文 (limit) — 推奨押し目価格
+        (should_wait, recommended_price)
+        - should_wait=True: 現在値が高すぎるので次サイクルまで待つ
+        - should_wait=False: 現在値が推奨エントリー付近なので成行OK
     """
     price = info["current_price"]
     entry_points = info.get("entry_points", [])
     if not entry_points:
-        return 0
+        return False, 0
 
     # "指値買い" の推奨エントリーを探す
     limit_entry = next(
@@ -230,18 +231,18 @@ def _pick_entry_price(info: dict[str, Any]) -> float:
         None,
     )
     if limit_entry is None or limit_entry <= 0:
-        return 0
+        return False, 0
 
-    # 急騰検知: 1日で大きく上がっていたら、乖離率に関係なく指値を強制
+    # 急騰検知: 1日で大きく上がっていたら、必ず待つ
     ret_1d = _parse_return_pct(info.get("returns", {}), "1日リターン")
     if ret_1d >= SURGE_RETURN_THRESHOLD:
-        return limit_entry
+        return True, limit_entry
 
-    # 通常: 現在値と推奨エントリーの乖離が閾値以上なら指値を使う
+    # 通常: 現在値と推奨エントリーの乖離が閾値以上なら待つ
     gap_ratio = (price - limit_entry) / price
     if gap_ratio >= ENTRY_GAP_THRESHOLD:
-        return limit_entry
-    return 0
+        return True, limit_entry
+    return False, 0
 
 
 def _parse_return_pct(returns: dict[str, str], key: str) -> float:
@@ -256,11 +257,10 @@ def _parse_return_pct(returns: dict[str, str], key: str) -> float:
 def _make_signal(info: dict[str, Any], reason: str) -> dict[str, Any]:
     risk = info.get("risk_management", {})
     price = info["current_price"]
-    entry_price = _pick_entry_price(info)
     return {
         "ticker": info["ticker"],
         "action": "buy",
-        "entry_price": entry_price,
+        "entry_price": 0,
         "target_price": risk.get("利確目標1（ATR×2）", price * 1.05),
         "stop_loss_price": risk.get("損切りライン", price * 0.97),
         "take_profit_price": risk.get("利確目標2（ATR×4）", price * 1.10),
@@ -575,6 +575,13 @@ def run_cycle(
         if "売り" in result["action"]:
             log(f"    判定が{result['action']} -> skip")
             continue
+
+        # 押し目待ちチェック: 現在値が推奨エントリーより高すぎるなら次サイクルで再評価
+        should_wait, rec_price = _should_wait_for_pullback(result)
+        if should_wait:
+            log(f"    ⏳ 押し目待ち: 現在値¥{result['current_price']:,.0f} > 推奨¥{rec_price:,.0f} -> 次サイクルで再評価")
+            continue
+
         scored.append(result)
         log("    -> 通過 ✓")
 
@@ -620,20 +627,19 @@ def run_cycle(
                 log(f"  ⛔ {ticker}: AI skip -> シグナル除外")
                 continue
 
-        # 資金不足チェック: 100株分の資金がなければ swap 候補へ
+        # 資金不足チェック
         price = s["current_price"]
-        min_cost = price * (100 if ticker.endswith(".T") else 1)
-        if min_cost > remaining_cash:
-            log(f"  💰 {ticker}: 資金不足 (必要≈¥{min_cost:,.0f}, 残高¥{remaining_cash:,.0f}) -> 入れ替え候補へ")
+        lot = 100 if ticker.endswith(".T") else 1
+        est_cost = price * lot
+        if est_cost > remaining_cash:
+            log(f"  💰 {ticker}: 資金不足 (必要≈¥{est_cost:,.0f}, 残高¥{remaining_cash:,.0f}) -> 入れ替え候補へ")
             swap_candidates.append(s)
             continue
 
         reason = f"auto_trade{'[AI]' if use_ai else ''}: score={s['score']}, {s['action']}"
         sig = _make_signal(s, reason)
         signals.append(sig)
-        # 残高を仮引き当て（次の銘柄の資金チェック用）
-        sig_cost = (sig["entry_price"] if sig["entry_price"] > 0 else price) * (100 if ticker.endswith(".T") else 1)
-        remaining_cash -= sig_cost
+        remaining_cash -= est_cost
 
     # Step 6: execute new buys
     executed: list[dict[str, Any]] = []
