@@ -418,12 +418,39 @@ def _execute_swap(
 ) -> list[dict[str, Any]]:
     """Sell one position and buy a replacement."""
     executed: list[dict[str, Any]] = []
+
+    # 事前チェック: 売却後に新規購入できるか？
+    pf_data = get_container().portfolio().load() or {}
+    pf_balance = pf_data.get("balance", {})
+    cash_now = pf_balance.get("cash_jpy", 0) + pf_balance.get("cash_usd", 0) * 150
+
+    # 売却で回収できる見込み額
+    sell_pos_data = next(
+        (p for p in pf_data.get("positions", []) if p.get("ticker") == sell_ticker), None
+    )
+    sell_proceeds = sell_pos_data["current_price"] * sell_qty if sell_pos_data else 0
+
+    # 新規購入に必要な額
+    buy_price = buy_info["current_price"]
+    buy_ticker = buy_info["ticker"]
+    buy_lot = 100 if buy_ticker.endswith(".T") else 1
+    buy_cost = buy_price * buy_lot
+
+    cash_after_swap = cash_now + sell_proceeds
+    if buy_cost > cash_after_swap:
+        log(
+            f"  ⛔ SWAP中止: 売却後も資金不足"
+            f" (売却見込¥{sell_proceeds:,.0f} + 残高¥{cash_now:,.0f} = ¥{cash_after_swap:,.0f}"
+            f" < 必要¥{buy_cost:,.0f})"
+        )
+        return executed
+
     if dry_run:
         log(f"  [DRY] SELL {sell_ticker} {sell_qty}株")
-        log(f"  [DRY] BUY  {buy_info['ticker']} (score={buy_info['score']})")
+        log(f"  [DRY] BUY  {buy_ticker} (score={buy_info['score']})")
         executed.append({"ticker": sell_ticker, "status": "DRY_SELL", "score": 0})
         executed.append(
-            {"ticker": buy_info["ticker"], "status": "DRY_BUY", "score": buy_info["score"]}
+            {"ticker": buy_ticker, "status": "DRY_BUY", "score": buy_info["score"]}
         )
         return executed
 
@@ -437,8 +464,8 @@ def _execute_swap(
         executed.append({"ticker": sell_ticker, "status": "SELL_FAILED", "score": 0})
         return executed  # don't buy if sell fails
 
-    sig = _make_signal(buy_info, f"auto_swap: {sell_ticker}->{buy_info['ticker']}")
-    log(f"  買い: {buy_info['ticker']}...")
+    sig = _make_signal(buy_info, f"auto_swap: {sell_ticker}->{buy_ticker}")
+    log(f"  買い: {buy_ticker}...")
     executed.extend(_execute_signals([sig], False, log))
     return executed
 
