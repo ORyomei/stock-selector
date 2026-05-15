@@ -265,7 +265,8 @@ def auto_trade(
     ai: Annotated[bool, typer.Option("--ai", help="AI判断有効")] = False,
     ai_provider: Annotated[str, typer.Option(help="AIプロバイダー")] = "copilot",
     ai_model: Annotated[Optional[str], typer.Option(help="AIモデル")] = None,
-    daemon: Annotated[bool, typer.Option(help="デーモンモード")] = False,
+    daemon: Annotated[bool, typer.Option(help="デーモンモード（自動バックグラウンド化）")] = False,
+    foreground: Annotated[bool, typer.Option("--fg", help="デーモンをフォアグラウンドで実行")] = False,
     interval: Annotated[int, typer.Option(help="実行間隔(秒)")] = 1800,
     legacy: Annotated[bool, typer.Option(help="レガシーモード")] = False,
 ) -> None:
@@ -282,6 +283,7 @@ def auto_trade(
             use_ai=ai,
             ai_provider=ai_provider,
             ai_model=ai_model,
+            foreground=foreground,
         )
     else:
         _acquire_lock()

@@ -65,7 +65,52 @@ MIN_SWAP_SCORE_DIFF_AI = 5
 # ── lock file (排他制御) ──────────────────────────────────────────────────────
 
 LOCK_FILE = PROJECT_DIR / ".auto_trade.lock"
+DAEMON_LOG = PROJECT_DIR / "logs" / "auto_trade_daemon.log"
 _lock_fd: int | None = None
+
+
+def _daemonize() -> None:
+    """Double-fork でプロセスをバックグラウンドに切り離す。"""
+    # Pipe to communicate grandchild PID back to parent
+    r_fd, w_fd = os.pipe()
+
+    # First fork
+    pid = os.fork()
+    if pid > 0:
+        # Parent: wait for grandchild PID from pipe
+        os.close(w_fd)
+        data = os.read(r_fd, 32)
+        os.close(r_fd)
+        grandchild_pid = int(data.strip())
+        print(f"✅ デーモン起動 (PID={grandchild_pid})")
+        print(f"   ログ: {DAEMON_LOG}")
+        print(f"   停止: kill {grandchild_pid}")
+        os._exit(0)
+
+    # Child: new session
+    os.close(r_fd)
+    os.setsid()
+
+    # Second fork (prevent re-acquiring terminal)
+    pid2 = os.fork()
+    if pid2 > 0:
+        # Send grandchild PID (pid2) to original parent
+        os.write(w_fd, f"{pid2}\n".encode())
+        os.close(w_fd)
+        os._exit(0)
+
+    os.close(w_fd)
+
+    # Grandchild: redirect stdio to log file
+    DAEMON_LOG.parent.mkdir(parents=True, exist_ok=True)
+    log_fd = os.open(str(DAEMON_LOG), os.O_CREAT | os.O_WRONLY | os.O_APPEND)
+    os.dup2(log_fd, sys.stdout.fileno())
+    os.dup2(log_fd, sys.stderr.fileno())
+    os.close(log_fd)
+    # Close stdin
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, sys.stdin.fileno())
+    os.close(devnull)
 
 
 def _acquire_lock() -> None:
@@ -696,8 +741,19 @@ def daemon_loop(
     use_ai: bool,
     ai_provider: str,
     ai_model: str | None,
+    foreground: bool = False,
 ) -> None:
+    # ロック取得を先に行う（fork前）→ 2重起動を即座にブロック
     _acquire_lock()
+
+    if not foreground:
+        _daemonize()
+        # fork後のgrandchildでPIDを更新
+        os.lseek(_lock_fd, 0, os.SEEK_SET)  # type: ignore[arg-type]
+        os.ftruncate(_lock_fd, 0)  # type: ignore[arg-type]
+        os.write(_lock_fd, f"{os.getpid()}\n".encode())  # type: ignore[arg-type]
+        os.fsync(_lock_fd)  # type: ignore[arg-type]
+
     atexit.register(_release_lock)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
@@ -705,7 +761,11 @@ def daemon_loop(
     print(f"  market={market}  min_score={min_score}  max_signals={max_signals}  dry_run={dry_run}")
     if use_ai:
         print(f"  AI: {ai_provider} (model: {ai_model or 'default'})")
-    print("  Ctrl+C で停止\n")
+    print(f"  PID={os.getpid()}")
+    if foreground:
+        print("  Ctrl+C で停止\n")
+    else:
+        print(f"  ログ: {DAEMON_LOG}\n")
 
     cycle = 0
     while True:
