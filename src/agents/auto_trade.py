@@ -19,7 +19,11 @@ Usage examples::
 from __future__ import annotations
 
 import argparse
+import atexit
+import fcntl
 import json
+import os
+import signal
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -57,6 +61,41 @@ MARKET_LABELS: dict[str, str] = {"us": "米国株", "jp": "日本株", "all": "�
 EXTREME_BEARISH_THRESHOLD = -30
 MIN_SWAP_SCORE_DIFF_RULE = 20
 MIN_SWAP_SCORE_DIFF_AI = 5
+
+# ── lock file (排他制御) ──────────────────────────────────────────────────────
+
+LOCK_FILE = PROJECT_DIR / ".auto_trade.lock"
+_lock_fd: int | None = None
+
+
+def _acquire_lock() -> None:
+    """ロックファイルを取得。既にデーモンが動いていたら即終了。"""
+    global _lock_fd
+    _lock_fd = os.open(str(LOCK_FILE), os.O_CREAT | os.O_WRONLY)
+    try:
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(_lock_fd)
+        _lock_fd = None
+        print("❌ 別のauto-tradeプロセスが実行中です。先に停止してください。", file=sys.stderr)
+        sys.exit(1)
+    # PIDを書き込む
+    os.ftruncate(_lock_fd, 0)
+    os.write(_lock_fd, f"{os.getpid()}\n".encode())
+    os.fsync(_lock_fd)
+
+
+def _release_lock() -> None:
+    """ロックファイルを解放。"""
+    global _lock_fd
+    if _lock_fd is not None:
+        fcntl.flock(_lock_fd, fcntl.LOCK_UN)
+        os.close(_lock_fd)
+        _lock_fd = None
+    try:
+        LOCK_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -658,6 +697,10 @@ def daemon_loop(
     ai_provider: str,
     ai_model: str | None,
 ) -> None:
+    _acquire_lock()
+    atexit.register(_release_lock)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+
     print(f"デーモンモード: {interval}s ({interval // 60}min) ごとに自動実行")
     print(f"  market={market}  min_score={min_score}  max_signals={max_signals}  dry_run={dry_run}")
     if use_ai:

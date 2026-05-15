@@ -270,7 +270,7 @@ def auto_trade(
     legacy: Annotated[bool, typer.Option(help="レガシーモード")] = False,
 ) -> None:
     """自動売買ループ."""
-    from agents.auto_trade import daemon_loop, run_cycle
+    from agents.auto_trade import daemon_loop, run_cycle, _acquire_lock, _release_lock
 
     if daemon:
         daemon_loop(
@@ -284,15 +284,19 @@ def auto_trade(
             ai_model=ai_model,
         )
     else:
-        run_cycle(
-            market=market,
-            min_score=min_score,
-            max_signals=max_signals,
-            dry_run=dry_run,
-            use_ai=ai,
-            ai_provider=ai_provider,
-            ai_model=ai_model,
-        )
+        _acquire_lock()
+        try:
+            run_cycle(
+                market=market,
+                min_score=min_score,
+                max_signals=max_signals,
+                dry_run=dry_run,
+                use_ai=ai,
+                ai_provider=ai_provider,
+                ai_model=ai_model,
+            )
+        finally:
+            _release_lock()
 
 
 # ── Auto Analyze ─────────────────────────────────────────
