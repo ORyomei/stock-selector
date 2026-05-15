@@ -62,9 +62,8 @@ MIN_SWAP_SCORE_DIFF_AI = 5
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-# エントリータイミング最適化
-ENTRY_GAP_THRESHOLD = 0.01     # 推奨エントリーと現在値の乖離がこれ以上なら指値を使う
-SURGE_RETURN_THRESHOLD = 5.0   # 1日リターンがこれ(%)以上なら急騰とみなし指値を強制
+# 急騰検知閾値（AI不使用時のルールベース判断で使用）
+SURGE_RETURN_THRESHOLD = 5.0   # 1日リターンがこれ(%)以上なら急騰とみなす
 
 
 def score_ticker(ticker: str) -> dict[str, Any] | None:
@@ -81,6 +80,7 @@ def score_ticker(ticker: str) -> dict[str, Any] | None:
         "score": summary.get("total_score", 0),
         "action": summary.get("action", ""),
         "confidence": summary.get("confidence", "低"),
+        "score_breakdown": summary.get("score_breakdown", {}),
         "current_price": price,
         "probability": scorer.get("probability", {}),
         "risk_management": scorer.get("risk_management", {}),
@@ -149,6 +149,10 @@ def _build_buy_prompt(
         f"市場: {ml}\nマクロ環境: {macro_j}\n候補: {data}\n\n"
         "判断ルール:\n"
         "- デッドキャットバウンス、出来高なしの上昇、過度なボラティリティを見抜く\n"
+        "- 急騰銘柄(_surge=True)は特に慎重に評価せよ:\n"
+        "  - ブレイクアウト初動（出来高増、レジスタンス突破、RSIがまだ中程度）→ buy\n"
+        "  - 過熱終盤（RSI高すぎ、BB上限超え、短期で既に大幅上昇済み）→ skip\n"
+        "  - 「今日急騰したが明日下がる可能性が高い」場合も skip\n"
         "- 各候補に buy/skip を判定、理由を明記\n\n"
         '出力（JSONのみ）:\n{"decisions": [{"ticker": "X", "decision": "buy", '
         '"confidence": 0.8, "reason": "..."}], "market_comment": "..."}'
@@ -207,42 +211,6 @@ def _execute_signals(
             {"ticker": sig["ticker"], "status": "FILLED" if ok else "FAILED", "score": sig["score"]}
         )
     return executed
-
-
-def _should_wait_for_pullback(info: dict[str, Any]) -> tuple[bool, float]:
-    """現在値がスコアラーの推奨エントリー価格より高すぎるなら、買いを見送る。
-
-    シミュレーターが指値注文に対応していないため、
-    「指値で待つ」代わりに「現在値が推奨価格に近づくまで見送る」方式。
-
-    Returns:
-        (should_wait, recommended_price)
-        - should_wait=True: 現在値が高すぎるので次サイクルまで待つ
-        - should_wait=False: 現在値が推奨エントリー付近なので成行OK
-    """
-    price = info["current_price"]
-    entry_points = info.get("entry_points", [])
-    if not entry_points:
-        return False, 0
-
-    # "指値買い" の推奨エントリーを探す
-    limit_entry = next(
-        (ep["price"] for ep in entry_points if ep.get("type") == "指値買い"),
-        None,
-    )
-    if limit_entry is None or limit_entry <= 0:
-        return False, 0
-
-    # 急騰検知: 1日で大きく上がっていたら、必ず待つ
-    ret_1d = _parse_return_pct(info.get("returns", {}), "1日リターン")
-    if ret_1d >= SURGE_RETURN_THRESHOLD:
-        return True, limit_entry
-
-    # 通常: 現在値と推奨エントリーの乖離が閾値以上なら待つ
-    gap_ratio = (price - limit_entry) / price
-    if gap_ratio >= ENTRY_GAP_THRESHOLD:
-        return True, limit_entry
-    return False, 0
 
 
 def _parse_return_pct(returns: dict[str, str], key: str) -> float:
@@ -566,7 +534,8 @@ def run_cycle(
             continue
         ret_1d = _parse_return_pct(result.get("returns", {}), "1日リターン")
         if ret_1d >= SURGE_RETURN_THRESHOLD:
-            log(f"    📈 急騰検知 (1日+{ret_1d:.1f}%) → 指値注文を強制")
+            result["_surge"] = True
+            log(f"    📈 急騰検知 (1日+{ret_1d:.1f}%)")
 
         log(f"    score={result['score']}, action={result['action']}, conf={result['confidence']}")
         if result["score"] < min_score:
@@ -576,11 +545,18 @@ def run_cycle(
             log(f"    判定が{result['action']} -> skip")
             continue
 
-        # 押し目待ちチェック: 現在値が推奨エントリーより高すぎるなら次サイクルで再評価
-        should_wait, rec_price = _should_wait_for_pullback(result)
-        if should_wait:
-            log(f"    ⏳ 押し目待ち: 現在値¥{result['current_price']:,.0f} > 推奨¥{rec_price:,.0f} -> 次サイクルで再評価")
-            continue
+        # AI不使用時の急騰フィルター: RSI・BBが過熱を示している場合のみスキップ
+        # AI使用時は「急騰の質」をAIに判断させるのでここでは通す
+        if result.get("_surge") and not use_ai:
+            scores = result.get("score_breakdown", {})
+            rsi_score = scores.get("rsi", 0)
+            bb_score = scores.get("bb", 0)
+            # RSIが買われすぎ(-10以下) かつ BBが上限付近(-5以下) = 過熱→下がる可能性高
+            if rsi_score <= -10 and bb_score <= -5:
+                log(f"    ⚠️ 急騰+過熱 (RSI={rsi_score}, BB={bb_score}) -> 調整入りの可能性が高いためskip")
+                continue
+            else:
+                log(f"    ✅ 急騰だがRSI/BBは過熱でない (RSI={rsi_score}, BB={bb_score}) -> 継続")
 
         scored.append(result)
         log("    -> 通過 ✓")
