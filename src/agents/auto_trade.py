@@ -522,6 +522,35 @@ def _execute_swap(
     return executed
 
 
+# ── reconcile helper ──────────────────────────────────────────────────────────
+
+
+def _reconcile_if_needed(log) -> None:
+    """kabuブローカー使用時にサイクル先頭でポートフォリオを同期する。"""
+    try:
+        config_path = PROJECT_DIR / "config" / "trading_config.json"
+        if not config_path.exists():
+            return
+        import json as _json
+        with open(config_path) as f:
+            config = _json.load(f)
+        if config.get("broker", "simulator") == "simulator":
+            return
+        from core.reconcile import reconcile
+        from core.trade import load_or_create_broker
+        broker = load_or_create_broker(config)
+        result = reconcile(broker, apply=True, verbose=False)
+        if result.synced:
+            log("  🔄 ブローカーとローカルの同期を実行しました")
+            for d in result.diffs:
+                if d.action != "MATCH":
+                    log(f"     {d.action}: {d.ticker} (local={d.local_qty} -> broker={d.broker_qty})")
+        else:
+            log("  ✅ ブローカーと同期済み")
+    except Exception as e:
+        log(f"  ⚠️ ブローカー同期エラー (続行): {e}")
+
+
 # ── main cycle ────────────────────────────────────────────────────────────────
 
 
@@ -547,6 +576,9 @@ def run_cycle(
     log(f"  market={market}  min_score={min_score}  max_signals={max_signals}")
     log(f"  dry_run={dry_run}  ai={use_ai}" + (f" ({ai_provider})" if use_ai else ""))
     log(f"{'=' * 60}\n")
+
+    # Step 0: ブローカー同期 (kabuモード時のみ)
+    _reconcile_if_needed(log)
 
     # Step 1: auto-close
     log("Step 1: 自動クローズ判定...")
