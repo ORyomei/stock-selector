@@ -173,12 +173,13 @@ def alert(
 # ── Portfolio ────────────────────────────────────────────
 @app.command()
 def portfolio(
-    command: Annotated[str, typer.Argument(help="status|buy|sell|performance")],
+    command: Annotated[str, typer.Argument(help="status|buy|sell|performance|reconcile")],
     ticker: Annotated[Optional[str], typer.Argument(help="銘柄")] = None,
     shares: Annotated[Optional[int], typer.Argument(help="株数")] = None,
     price: Annotated[Optional[float], typer.Argument(help="価格")] = None,
     stop_loss: Annotated[Optional[float], typer.Option(help="損切りライン")] = None,
     take_profit: Annotated[Optional[float], typer.Option(help="利確ライン")] = None,
+    apply: Annotated[bool, typer.Option("--apply", help="照合結果をローカルに反映")] = False,
 ) -> None:
     """ポートフォリオ管理."""
     from core.portfolio_ops import (
@@ -189,6 +190,20 @@ def portfolio(
         load_portfolio,
         save_portfolio,
     )
+
+    if command == "reconcile":
+        from core.reconcile import reconcile
+        from core.trade import load_or_create_broker
+
+        import json
+        config_path = Path(__file__).resolve().parent.parent.parent / "config" / "trading_config.json"
+        with open(config_path) as f:
+            config = json.load(f)
+        broker = load_or_create_broker(config)
+        result = reconcile(broker, apply=apply)
+        if not apply and any(d.action != "MATCH" for d in result.diffs) or abs(result.cash_diff) > 1:
+            typer.echo("\n💡 同期するには: uv run stock-selector portfolio reconcile --apply")
+        return
 
     pf = load_portfolio()
     if command == "status":
