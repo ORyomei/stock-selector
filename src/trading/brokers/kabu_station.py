@@ -45,10 +45,12 @@ logger = logging.getLogger(__name__)
 
 
 # 市場コード (Exchange)
-EXCHANGE_TOSHO = 1  # 東証
+EXCHANGE_TOSHO = 1  # 東証 (※照会用。新規発注には通常 SOR or 東証+ を使う)
 EXCHANGE_MEISHO = 3  # 名証
 EXCHANGE_FSE = 5  # 福証
 EXCHANGE_SSE = 6  # 札証
+EXCHANGE_SOR = 9  # SOR (発注時の推奨)
+EXCHANGE_TOSHO_PLUS = 27  # 東証+ (発注時の推奨)
 
 # 注文タイプ (FrontOrderType)
 FRONT_ORDER_MARKET = 10  # 成行
@@ -67,6 +69,10 @@ CASH_MARGIN_SPOT = 1
 
 # 受渡区分 (DelivType): 0=指定なし(信用), 2=お預かり金, 3=auマネーコネクト
 DELIV_TYPE_CASH = 2
+
+# 資産区分 (FundType)
+FUND_TYPE_DEFAULT = "  "  # 半角スペース2つ (売り時 / 信用時)
+FUND_TYPE_MARGIN = "02"  # 保護区分 (現物買の既定値)
 
 # 有効期限区分 (TimeInForce): 1=FAS, 2=FAK, 3=FOK
 TIF_FAS = 1
@@ -106,6 +112,9 @@ class KabuStationBroker(BrokerInterface):
                 f"trading_config.json の kabu.api_password に設定してください。"
             )
 
+        # 発注用市場コード: SOR(9) が推奨。東証(1)は通常時の新規発注不可
+        self.order_exchange = config.get("order_exchange", EXCHANGE_SOR)
+        # 照会用市場コード (positions/board)
         self.default_exchange = config.get("default_exchange", EXCHANGE_TOSHO)
         self.account_type = config.get("account_type", ACCOUNT_TYPE_TOKUTEI)
         self.timeout = config.get("timeout", 10)
@@ -190,24 +199,40 @@ class KabuStationBroker(BrokerInterface):
     # ------------------------------------------------------------------
     # ティッカー変換
     # ------------------------------------------------------------------
-    def _parse_ticker(self, ticker: str) -> tuple[str, int]:
-        """"7203.T" → ("7203", 1) のように分解。"""
+    def _parse_ticker(self, ticker: str, *, for_order: bool = False) -> tuple[str, int]:
+        """"7203.T" → ("7203", exchange) のように分解。
+
+        Args:
+            for_order: True なら発注用の市場コード (SOR等) を返す。
+                       False なら照会用の市場コード (東証等) を返す。
+        """
         if "." in ticker:
             symbol, suffix = ticker.split(".", 1)
-            mapping = {
-                "T": EXCHANGE_TOSHO,
-                "N": EXCHANGE_MEISHO,
-                "F": EXCHANGE_FSE,
-                "S": EXCHANGE_SSE,
-            }
-            exchange = mapping.get(suffix.upper(), self.default_exchange)
+            if for_order:
+                # 発注時: 東証銘柄は SOR/東証+ を使う (東証直接は新規発注不可)
+                order_mapping = {
+                    "T": self.order_exchange,
+                    "N": EXCHANGE_MEISHO,
+                    "F": EXCHANGE_FSE,
+                    "S": EXCHANGE_SSE,
+                }
+                exchange = order_mapping.get(suffix.upper(), self.order_exchange)
+            else:
+                # 照会時: 東証(1)でOK
+                query_mapping = {
+                    "T": EXCHANGE_TOSHO,
+                    "N": EXCHANGE_MEISHO,
+                    "F": EXCHANGE_FSE,
+                    "S": EXCHANGE_SSE,
+                }
+                exchange = query_mapping.get(suffix.upper(), self.default_exchange)
             return symbol, exchange
         # 米国株などサフィックスなし → 非対応
         if not ticker.isdigit():
             raise KabuStationError(
                 f"kabu API は日本株のみ対応です: {ticker} は発注できません"
             )
-        return ticker, self.default_exchange
+        return ticker, self.order_exchange if for_order else self.default_exchange
 
     # ------------------------------------------------------------------
     # BrokerInterface 実装
@@ -215,7 +240,13 @@ class KabuStationBroker(BrokerInterface):
     def get_balance(self) -> dict[str, Any]:
         """買付余力を取得。"""
         data = self._request("GET", "/wallet/cash")
-        cash_jpy = float(data.get("StockAccountWallet", 0))
+        # 口座タイプにより値が入るフィールドが異なる
+        cash_jpy = float(
+            data.get("StockAccountWallet")
+            or data.get("AuKCStockAccountWallet")
+            or data.get("AuJbnStockAccountWallet")
+            or 0
+        )
         self._balance_cache = {
             "cash_jpy": cash_jpy,
             "cash_usd": 0.0,
@@ -234,7 +265,7 @@ class KabuStationBroker(BrokerInterface):
         take_profit: float | None = None,
     ) -> Order:
         """現物注文を発注する。"""
-        symbol, exchange = self._parse_ticker(ticker)
+        symbol, exchange = self._parse_ticker(ticker, for_order=True)
 
         front_order_type = {
             OrderType.MARKET: FRONT_ORDER_MARKET,
@@ -244,6 +275,9 @@ class KabuStationBroker(BrokerInterface):
 
         kabu_side = SIDE_BUY if side == OrderSide.BUY else SIDE_SELL
 
+        # FundType: 現物買=保護区分"02", 現物売="  "(半角スペース2つ)
+        fund_type = FUND_TYPE_MARGIN if side == OrderSide.BUY else FUND_TYPE_DEFAULT
+
         body: dict[str, Any] = {
             "Symbol": symbol,
             "Exchange": exchange,
@@ -251,6 +285,7 @@ class KabuStationBroker(BrokerInterface):
             "Side": kabu_side,
             "CashMargin": CASH_MARGIN_SPOT,
             "DelivType": DELIV_TYPE_CASH if side == OrderSide.BUY else 0,
+            "FundType": fund_type,
             "AccountType": self.account_type,
             "Qty": int(quantity),
             "FrontOrderType": front_order_type,
@@ -295,24 +330,45 @@ class KabuStationBroker(BrokerInterface):
 
     def get_orders(self) -> list[Order]:
         """未約定注文一覧。"""
-        data = self._request("GET", "/orders") or []
+        data = self._request("GET", "/orders", params={"product": "0"}) or []
         result: list[Order] = []
         for item in data:
+            # State: 1=待機 2=処理中 3=処理済 4=訂正取消中 5=終了
             state = item.get("State", 0)
-            # State: 1=待機(発注待) 2=処理中 3=処理済 4=訂正取消中 5=終了
-            # OrderState 内訳の "OrdStatus": 1=待機, 2=新規, 3=部分約定, 4=約定, 5=取消, 6=失効
-            ord_status = item.get("OrderState", 0)
-            status_map = {
-                1: OrderStatus.PENDING,
-                2: OrderStatus.PENDING,
-                3: OrderStatus.PARTIALLY_FILLED,
-                4: OrderStatus.FILLED,
-                5: OrderStatus.CANCELLED,
-                6: OrderStatus.REJECTED,
-            }
-            status = status_map.get(ord_status, OrderStatus.PENDING)
-            if status in (OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED):
+            if state == 5:
+                # 終了した注文はスキップ (約定・取消・失効)
                 continue
+
+            # CumQty(累計約定数量) vs OrderQty で部分約定を判定
+            order_qty = int(item.get("OrderQty", 0))
+            cum_qty = int(item.get("CumQty", 0) or 0)
+            if cum_qty >= order_qty and order_qty > 0:
+                status = OrderStatus.FILLED
+            elif cum_qty > 0:
+                status = OrderStatus.PARTIALLY_FILLED
+            else:
+                status = OrderStatus.PENDING
+
+            if status == OrderStatus.FILLED:
+                continue
+
+            # 約定価格は Details 配列から取得
+            fill_price = None
+            details = item.get("Details", [])
+            if details and cum_qty > 0:
+                # 加重平均約定価格を計算
+                total_value = sum(
+                    float(d.get("Price", 0) or 0) * int(d.get("Qty", 0) or 0)
+                    for d in details
+                    if d.get("RecType") == 8  # 8=約定
+                )
+                total_qty = sum(
+                    int(d.get("Qty", 0) or 0)
+                    for d in details
+                    if d.get("RecType") == 8
+                )
+                if total_qty > 0:
+                    fill_price = total_value / total_qty
 
             ticker_str = f"{item.get('Symbol', '')}.T"
             side = OrderSide.BUY if str(item.get("Side")) == SIDE_BUY else OrderSide.SELL
@@ -329,12 +385,12 @@ class KabuStationBroker(BrokerInterface):
                     id=str(item.get("ID", item.get("OrderId", ""))),
                     ticker=ticker_str,
                     side=side,
-                    quantity=int(item.get("OrderQty", 0)),
+                    quantity=order_qty,
                     entry_price=float(item.get("Price", 0) or 0),
                     order_type=order_type,
                     order_time=datetime.now(UTC),
-                    filled_quantity=int(item.get("CumQty", 0) or 0),
-                    fill_price=float(item.get("Price", 0) or 0) or None,
+                    filled_quantity=cum_qty,
+                    fill_price=fill_price,
                     status=status,
                 )
             )
@@ -342,8 +398,9 @@ class KabuStationBroker(BrokerInterface):
         return result
 
     def get_positions(self) -> list[Position]:
-        """保有ポジション一覧。"""
-        data = self._request("GET", "/positions") or []
+        """保有ポジション一覧（現物のみ）。"""
+        # product=1: 現物のみ (2=信用, 3=先物, 4=OP)
+        data = self._request("GET", "/positions", params={"product": "1"}) or []
         positions: list[Position] = []
         for item in data:
             qty = int(item.get("LeavesQty", 0))
@@ -365,18 +422,38 @@ class KabuStationBroker(BrokerInterface):
 
     def get_filled_orders(self, limit: int = 100) -> list[Order]:
         """約定済み注文の履歴を取得。"""
-        data = self._request("GET", "/orders") or []
+        data = self._request("GET", "/orders", params={"product": "0"}) or []
         result: list[Order] = []
         for item in data[:limit]:
-            ord_status = item.get("OrderState", 0)
-            status_map = {
-                4: OrderStatus.FILLED,
-                5: OrderStatus.CANCELLED,
-                6: OrderStatus.REJECTED,
-            }
-            status = status_map.get(ord_status)
-            if status is None:
+            # State=5 (終了) かつ CumQty>0 → 約定
+            state = item.get("State", 0)
+            if state != 5:
                 continue
+            order_qty = int(item.get("OrderQty", 0))
+            cum_qty = int(item.get("CumQty", 0) or 0)
+            if cum_qty > 0:
+                status = OrderStatus.FILLED
+            else:
+                # 約定なしで終了 = 取消 or 失効
+                status = OrderStatus.CANCELLED
+
+            # 約定価格は Details から取得
+            fill_price = None
+            details = item.get("Details", [])
+            if details and cum_qty > 0:
+                total_value = sum(
+                    float(d.get("Price", 0) or 0) * int(d.get("Qty", 0) or 0)
+                    for d in details
+                    if d.get("RecType") == 8
+                )
+                total_qty = sum(
+                    int(d.get("Qty", 0) or 0)
+                    for d in details
+                    if d.get("RecType") == 8
+                )
+                if total_qty > 0:
+                    fill_price = total_value / total_qty
+
             ticker_str = f"{item.get('Symbol', '')}.T"
             side = OrderSide.BUY if str(item.get("Side")) == SIDE_BUY else OrderSide.SELL
             result.append(
@@ -384,12 +461,12 @@ class KabuStationBroker(BrokerInterface):
                     id=str(item.get("ID", item.get("OrderId", ""))),
                     ticker=ticker_str,
                     side=side,
-                    quantity=int(item.get("OrderQty", 0)),
+                    quantity=order_qty,
                     entry_price=float(item.get("Price", 0) or 0),
                     order_type=OrderType.MARKET,
                     order_time=datetime.now(UTC),
-                    filled_quantity=int(item.get("CumQty", 0) or 0),
-                    fill_price=float(item.get("Price", 0) or 0) or None,
+                    filled_quantity=cum_qty,
+                    fill_price=fill_price,
                     status=status,
                 )
             )
