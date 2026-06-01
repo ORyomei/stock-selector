@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
@@ -367,6 +368,36 @@ def kabu_check(
         typer.echo(f"❌ {result.get('error')}", err=True)
         raise typer.Exit(1)
     _json_out(result)
+
+
+# ── Daemon Stop ──────────────────────────────────────────
+@app.command(name="stop")
+def stop_daemon() -> None:
+    """稼働中のデーモンを停止."""
+    import signal as sig
+
+    lock_file = Path(__file__).resolve().parent.parent.parent / ".auto_trade.lock"
+    if not lock_file.exists():
+        typer.echo("❌ デーモンが稼働していません（ロックファイルなし）")
+        raise typer.Exit(1)
+
+    try:
+        pid = int(lock_file.read_text().strip())
+    except (ValueError, OSError):
+        typer.echo("❌ PID を読み取れません")
+        raise typer.Exit(1)
+
+    # プロセス存在確認
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        typer.echo(f"❌ PID {pid} のプロセスは存在しません（既に停止済み）")
+        lock_file.unlink(missing_ok=True)
+        raise typer.Exit(1)
+
+    os.kill(pid, sig.SIGTERM)
+    typer.echo(f"✅ デーモン停止シグナル送信 (PID={pid})")
+
 
 
 def main() -> None:

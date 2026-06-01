@@ -764,6 +764,35 @@ def run_cycle(
 # ── daemon ────────────────────────────────────────────────────────────────────
 
 
+def _should_skip_cycle(market: str) -> bool:
+    """取引時間外ならTrue。東証 8:30-16:00 / 米国 22:00-06:00 JST (余裕込み)."""
+    JST = timezone(timedelta(hours=9))
+    now = datetime.now(JST)
+    weekday = now.weekday()  # 0=Mon ... 6=Sun
+    hour = now.hour
+    minute = now.minute
+    t = hour * 60 + minute
+
+    # 土日は全市場スキップ
+    if weekday >= 5:
+        return True
+
+    jp_open = 8 * 60 + 30   # 08:30
+    jp_close = 16 * 60       # 16:00
+    us_open = 22 * 60        # 22:00 (JST)
+    us_close = 6 * 60        # 06:00 (JST, 翌朝)
+
+    if market == "jp":
+        return not (jp_open <= t <= jp_close)
+    elif market == "us":
+        return not (t >= us_open or t <= us_close)
+    else:  # "all"
+        # 日本か米国どちらかが開いていればOK
+        jp_active = jp_open <= t <= jp_close
+        us_active = t >= us_open or t <= us_close
+        return not (jp_active or us_active)
+
+
 def daemon_loop(
     market: str,
     min_score: int,
@@ -802,6 +831,19 @@ def daemon_loop(
     cycle = 0
     while True:
         cycle += 1
+
+        # 取引時間外スキップ（東証 9:00-15:30 / 米国 22:30-05:00 JST）
+        if _should_skip_cycle(market):
+            JST = timezone(timedelta(hours=9))
+            now_jst = datetime.now(JST)
+            print(f"\n### サイクル #{cycle} [SKIP] {now_jst.strftime('%H:%M')} JST — 取引時間外 ###")
+            try:
+                time.sleep(interval)
+            except KeyboardInterrupt:
+                print("\nデーモン停止")
+                break
+            continue
+
         print(f"\n### サイクル #{cycle} ###")
         try:
             run_cycle(market, min_score, max_signals, dry_run, use_ai, ai_provider, ai_model)

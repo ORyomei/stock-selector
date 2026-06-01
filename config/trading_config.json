@@ -2,7 +2,7 @@
   "mode": "simulator",
   "broker": "simulator",
   "simulator": {
-    "initial_capital_jpy": 1000000,
+    "initial_capital_jpy": 3000000,
     "initial_capital_usd": 0,
     "spread_pct": 0.02
   },

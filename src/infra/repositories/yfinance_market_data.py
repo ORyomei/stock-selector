@@ -31,7 +31,13 @@ class YFinanceMarketDataRepository(MarketDataRepository):
                 t = yf.Ticker(ticker)
                 hist = t.history(period=period, interval=interval)
                 if hist is not None and not hist.empty:
-                    return hist
+                    # yfinance が複数日取得時に最終行の OHLC を NaN で返すことがある
+                    # (Volume だけ先に配信される Yahoo API の仕様)
+                    # 末尾の NaN 行を除外して有効なデータのみ返す
+                    if "Close" in hist.columns:
+                        hist = hist[hist["Close"].notna()]
+                    if not hist.empty:
+                        return hist
             except Exception as e:
                 print(
                     f"WARN: {ticker} 履歴取得失敗 (attempt {attempt + 1}): {e}",
@@ -63,9 +69,12 @@ class YFinanceMarketDataRepository(MarketDataRepository):
             t = yf.Ticker(ticker)
             hist = t.history(period="5d", interval="1d")
             if hist is not None and not hist.empty:
-                price = float(hist["Close"].iloc[-1])
-                if math.isfinite(price):
-                    return price
+                # NaN 行を除外
+                hist = hist[hist["Close"].notna()]
+                if not hist.empty:
+                    price = float(hist["Close"].iloc[-1])
+                    if math.isfinite(price):
+                        return price
         except Exception:
             pass
         return None
