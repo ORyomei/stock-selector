@@ -12,9 +12,10 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +70,63 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def save_portfolio(data: dict):
-    get_container().portfolio().save(data)
+    get_container().portfolio().save(_denormalize(data))
+
+
+def _denormalize(flat: dict[str, Any]) -> dict[str, Any]:
+    """フラット形式 (cash_jpy / holdings) を実ファイルのネスト形式
+    (balance / positions / orders) に戻す。
+
+    旧実装はフラット形式をそのまま書き戻していたため positions/balance キーが
+    消滅し、次回 simulator.from_dict / JsonPortfolioRepository が保有ゼロと誤認して
+    建玉を全消去していた。ここでネスト形式へ逆変換して往復の整合を保つ。
+    """
+    # 既にネスト形式 (holdings を持たない) ならそのまま
+    if "holdings" not in flat:
+        return flat
+
+    raw: dict[str, Any] = copy.deepcopy(flat["_raw"]) if flat.get("_raw") else {}
+    raw.setdefault("metadata", {})
+    raw.setdefault("orders", {"pending": [], "filled": []})
+
+    # 既存 positions を ticker で引けるようにし、current_price/entry_time を温存
+    prior = {p.get("ticker"): p for p in raw.get("positions", [])}
+
+    new_positions: list[dict[str, Any]] = []
+    for h in flat.get("holdings", []):
+        ticker = h["ticker"]
+        prev = prior.get(ticker, {})
+        entry_time = prev.get("entry_time")
+        if not entry_time:
+            ed = h.get("entry_date")
+            entry_time = (
+                f"{ed}T00:00:00+00:00"
+                if ed and ed != "N/A"
+                else datetime.now(UTC).isoformat()
+            )
+        entry_price = h.get("entry_price", 0)
+        new_positions.append({
+            "ticker": ticker,
+            "quantity": h.get("shares", 0),
+            "entry_price": entry_price,
+            "current_price": prev.get("current_price", entry_price),
+            "entry_time": entry_time,
+            "stop_loss": h.get("stop_loss"),
+            "take_profit": h.get("take_profit"),
+        })
+
+    prev_balance = raw.get("balance", {})
+    now_iso = datetime.now(UTC).isoformat()
+    raw["balance"] = {
+        "cash_jpy": flat.get("cash_jpy", prev_balance.get("cash_jpy", 0)),
+        "cash_usd": flat.get("cash_usd", prev_balance.get("cash_usd", 0)),
+        "timestamp": now_iso,
+    }
+    raw["positions"] = new_positions
+    # portfolio_ops 独自の取引履歴は追加キーとして温存 (simulator.from_dict は無視する)
+    raw["history"] = flat.get("history", [])
+    raw["metadata"]["last_updated"] = now_iso
+    return raw
 
 
 def get_current_price(ticker: str) -> float | None:

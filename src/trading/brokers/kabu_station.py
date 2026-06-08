@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -238,6 +238,10 @@ class KabuStationBroker(BrokerInterface):
     # ------------------------------------------------------------------
     # BrokerInterface 実装
     # ------------------------------------------------------------------
+    def managed_currencies(self) -> set[str]:
+        """kabu は日本株 (現物) のみ取り扱う → JPY のみ管理。"""
+        return {"JPY"}
+
     def get_balance(self) -> dict[str, Any]:
         """買付余力を取得。"""
         data = self._request("GET", "/wallet/cash")
@@ -302,19 +306,95 @@ class KabuStationBroker(BrokerInterface):
         if not data or data.get("Result", -1) != 0:
             raise KabuStationError(f"kabu 発注失敗: {data}")
 
-        order_id = data.get("OrderId", str(uuid.uuid4()))
+        order_id = data.get("OrderId")
+        if not order_id:
+            # Result==0 でも OrderId が無い応答は追跡不能 → 偽 ID を採番せずエラーにする
+            raise KabuStationError(f"kabu 発注応答に OrderId がありません: {data}")
+
+        # sendorder は非同期。約定状況をポーリングして FILLED / 約定単価を反映する
+        # (成行は通常即時約定。execute_signal は FILLED のみ success 扱いのため必須)
+        return self._resolve_order(
+            order_id,
+            ticker=ticker,
+            side=side,
+            quantity=quantity,
+            entry_price=entry_price,
+            order_type=order_type,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+        )
+
+    def _resolve_order(
+        self,
+        order_id: str,
+        *,
+        ticker: str,
+        side: OrderSide,
+        quantity: int,
+        entry_price: float,
+        order_type: OrderType,
+        stop_loss: float | None,
+        take_profit: float | None,
+        poll: int = 5,
+        interval: float = 0.6,
+    ) -> Order:
+        """sendorder 後に /orders を数回ポーリングして注文状態を解決する。
+
+        約定完了なら FILLED + 加重平均約定単価、終了かつ未約定なら CANCELLED、
+        解決できなければ PENDING を返す。
+        """
+        status = OrderStatus.PENDING
+        fill_price: float | None = None
+        filled_qty = 0
+        for attempt in range(poll):
+            try:
+                rows = self._request("GET", "/orders", params={"id": str(order_id)}) or []
+            except KabuStationError:
+                rows = []
+            row = rows[0] if rows else None
+            if row:
+                state = int(row.get("State", 0) or 0)
+                order_qty = int(row.get("OrderQty", quantity) or quantity)
+                filled_qty = int(row.get("CumQty", 0) or 0)
+                fill_price = self._avg_fill_price(row.get("Details", []))
+                if order_qty > 0 and filled_qty >= order_qty:
+                    status = OrderStatus.FILLED
+                    break
+                if state == 5:  # 終了 (約定 or 取消・失効)
+                    status = OrderStatus.FILLED if filled_qty > 0 else OrderStatus.CANCELLED
+                    break
+                if filled_qty > 0:
+                    status = OrderStatus.PARTIALLY_FILLED
+            if attempt < poll - 1:
+                time.sleep(interval)
+
         return Order(
-            id=order_id,
+            id=str(order_id),
             ticker=ticker,
             side=side,
             quantity=quantity,
             entry_price=float(entry_price),
             order_type=order_type,
             order_time=datetime.now(UTC),
-            status=OrderStatus.PENDING,
+            filled_quantity=filled_qty,
+            fill_price=fill_price,
+            status=status,
             stop_loss=stop_loss,
             take_profit=take_profit,
         )
+
+    @staticmethod
+    def _avg_fill_price(details: list[dict[str, Any]]) -> float | None:
+        """Details 配列 (RecType==8 が約定) から加重平均約定単価を計算する。"""
+        total_value = sum(
+            float(d.get("Price", 0) or 0) * int(d.get("Qty", 0) or 0)
+            for d in details
+            if d.get("RecType") == 8
+        )
+        total_qty = sum(
+            int(d.get("Qty", 0) or 0) for d in details if d.get("RecType") == 8
+        )
+        return total_value / total_qty if total_qty > 0 else None
 
     def cancel_order(self, order_id: str) -> bool:
         """注文キャンセル。"""
@@ -354,22 +434,7 @@ class KabuStationBroker(BrokerInterface):
                 continue
 
             # 約定価格は Details 配列から取得
-            fill_price = None
-            details = item.get("Details", [])
-            if details and cum_qty > 0:
-                # 加重平均約定価格を計算
-                total_value = sum(
-                    float(d.get("Price", 0) or 0) * int(d.get("Qty", 0) or 0)
-                    for d in details
-                    if d.get("RecType") == 8  # 8=約定
-                )
-                total_qty = sum(
-                    int(d.get("Qty", 0) or 0)
-                    for d in details
-                    if d.get("RecType") == 8
-                )
-                if total_qty > 0:
-                    fill_price = total_value / total_qty
+            fill_price = self._avg_fill_price(item.get("Details", [])) if cum_qty > 0 else None
 
             ticker_str = f"{item.get('Symbol', '')}.T"
             side = OrderSide.BUY if str(item.get("Side")) == SIDE_BUY else OrderSide.SELL
@@ -436,21 +501,7 @@ class KabuStationBroker(BrokerInterface):
             status = OrderStatus.FILLED if cum_qty > 0 else OrderStatus.CANCELLED
 
             # 約定価格は Details から取得
-            fill_price = None
-            details = item.get("Details", [])
-            if details and cum_qty > 0:
-                total_value = sum(
-                    float(d.get("Price", 0) or 0) * int(d.get("Qty", 0) or 0)
-                    for d in details
-                    if d.get("RecType") == 8
-                )
-                total_qty = sum(
-                    int(d.get("Qty", 0) or 0)
-                    for d in details
-                    if d.get("RecType") == 8
-                )
-                if total_qty > 0:
-                    fill_price = total_value / total_qty
+            fill_price = self._avg_fill_price(item.get("Details", [])) if cum_qty > 0 else None
 
             ticker_str = f"{item.get('Symbol', '')}.T"
             side = OrderSide.BUY if str(item.get("Side")) == SIDE_BUY else OrderSide.SELL

@@ -403,7 +403,8 @@ def _analyze_impl(ticker: str) -> dict | None:
         "high_60d": round(high_60d, 2),
         "pe": round(pe, 2) if pe else None,
         "pb": round(pb, 2) if pb else None,
-        "div_yield": round(div_yield * 100, 2) if div_yield else None,
+        # yfinance 1.x の dividendYield は既に % 値 (例 2.98 = 2.98%) で返るため ×100 しない
+        "div_yield": round(div_yield, 2) if div_yield else None,
         "market_cap": market_cap,
     }
 

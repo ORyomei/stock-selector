@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -21,14 +24,35 @@ class JsonPortfolioRepository(PortfolioRepository):
         self._risk_limits_path = risk_limits_path
 
     def load(self) -> dict[str, Any] | None:
-        if self._portfolio_path.exists():
+        if not self._portfolio_path.exists():
+            return None
+        try:
             with open(self._portfolio_path) as f:
                 return json.load(f)
-        return None
+        except (json.JSONDecodeError, OSError):
+            # 破損時は直近のバックアップにフォールバック
+            backup = self._portfolio_path.with_name(self._portfolio_path.name + ".bak")
+            if backup.exists():
+                with open(backup) as f:
+                    return json.load(f)
+            raise
 
     def save(self, data: dict[str, Any]) -> None:
-        with open(self._portfolio_path, "w") as f:
+        # アトミック書き込み: temp に書いてから os.replace で原子的に差し替える。
+        # 途中クラッシュでも portfolio.json が壊れた JSON になることはない。
+        path = self._portfolio_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        with open(tmp, "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        # 既存ファイルを .bak にコピー退避 (best-effort)。コピーなので path は常に有効なまま。
+        if path.exists():
+            with contextlib.suppress(OSError):
+                shutil.copy2(path, path.with_name(path.name + ".bak"))
+        # 原子的に差し替え: 読み手は常に旧 or 新の完全なファイルを見る
+        os.replace(tmp, path)
 
     def get_held_tickers(self) -> set[str]:
         pf = self.load()

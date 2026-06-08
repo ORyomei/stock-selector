@@ -238,3 +238,12 @@ class BrokerInterface(ABC):
         (実装用) 実際の API から現在値・ポジション・残高を取得
         """
         pass
+
+    def managed_currencies(self) -> set[str] | None:
+        """このブローカーが管理する通貨の集合。
+
+        ``None`` は「全通貨を管理」(制限なし) を意味する。reconcile はこれを見て、
+        ブローカーが扱わない通貨の現金・建玉をローカルに温存する
+        (例: kabu は日本株のみ → ``{"JPY"}`` を返し、米国株/USD現金を消さない)。
+        """
+        return None

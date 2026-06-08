@@ -96,7 +96,11 @@ def analyze_fundamentals(ticker: str):
     for k, v in dividend.items():
         if v is None:
             continue
-        if k in ("配当利回り", "配当性向"):
+        if k == "配当利回り":
+            # yfinance 1.x の dividendYield は既に % 値 (2.98 = 2.98%)
+            result["dividend"][k] = f"{round(v, 1)}%"
+        elif k == "配当性向":
+            # payoutRatio は比率 (0.40 = 40%) なので ×100
             result["dividend"][k] = f"{round(v * 100, 1)}%"
         else:
             result["dividend"][k] = round(v, 2)
@@ -202,11 +206,11 @@ def analyze_fundamentals(ticker: str):
             score -= 5
             reasons.append("FCFマイナス")
 
-    # 配当利回り
+    # 配当利回り (yfinance 1.x は % 値: 2.98 = 2.98%)
     div_y = info.get("dividendYield")
-    if div_y is not None and div_y > 0.03:
+    if div_y is not None and div_y > 3.0:
         score += 5
-        reasons.append(f"高配当({div_y:.1%})")
+        reasons.append(f"高配当({div_y:.1f}%)")
 
     # アナリスト推奨
     rec = info.get("recommendationMean")

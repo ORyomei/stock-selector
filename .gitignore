@@ -25,6 +25,8 @@ logs/
 
 # Runtime state
 portfolio.json
+portfolio.json.tmp
+portfolio.json.bak
 
 # OS
 .DS_Store

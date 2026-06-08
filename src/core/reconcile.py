@@ -30,6 +30,11 @@ class ReconcileResult:
     synced: bool  # True if sync was applied
 
 
+def _currency_of(ticker: str) -> str:
+    """ティッカーから通貨を判定 (.T = 日本株 = JPY、その他 = USD)。"""
+    return "JPY" if ticker.endswith(".T") else "USD"
+
+
 def reconcile(
     broker: BrokerInterface,
     *,
@@ -52,11 +57,17 @@ def reconcile(
     broker_balance = broker.get_balance()
     broker_cash = float(broker_balance.get("cash_jpy", 0))
 
+    # ブローカーが管理する通貨 (None = 全通貨)。管理外の通貨の建玉・現金は照合対象外。
+    managed = broker.managed_currencies()
+
+    def _is_managed(ticker: str) -> bool:
+        return managed is None or _currency_of(ticker) in managed
+
     # --- ローカル状態 ---
     local_positions: list[dict[str, Any]] = local_data.get("positions", [])
     local_cash = float(local_data.get("balance", {}).get("cash_jpy", 0))
 
-    # --- 照合 ---
+    # --- 照合 (管理対象通貨のみ) ---
     local_map: dict[str, dict[str, Any]] = {p["ticker"]: p for p in local_positions}
     broker_map: dict[str, Position] = {p.ticker: p for p in broker_positions}
 
@@ -64,6 +75,8 @@ def reconcile(
     diffs: list[PositionDiff] = []
 
     for ticker in sorted(all_tickers):
+        if not _is_managed(ticker):
+            continue  # ブローカーが扱わない通貨 → 温存 (REMOVE しない)
         local_pos = local_map.get(ticker)
         broker_pos = broker_map.get(ticker)
 
@@ -101,7 +114,7 @@ def reconcile(
     # --- 同期適用 ---
     synced = False
     if apply and _has_differences(diffs, cash_diff):
-        _apply_sync(repo, local_data, broker_positions, broker_balance)
+        _apply_sync(repo, local_data, broker_positions, broker_balance, managed)
         synced = True
         if verbose:
             print("\n✅ ローカル portfolio.json をブローカー側に同期しました")
@@ -165,12 +178,22 @@ def _apply_sync(
     local_data: dict[str, Any],
     broker_positions: list[Position],
     broker_balance: dict[str, Any],
+    managed: set[str] | None,
 ) -> None:
-    """ローカル portfolio.json をブローカーの実態に合わせて上書き。"""
+    """ローカル portfolio.json をブローカーの実態に合わせて上書き。
+
+    ブローカーが管理しない通貨 (managed 外) の建玉・現金はローカル値を温存する。
+    """
     now = datetime.now(UTC).isoformat()
 
-    # ポジションを差し替え
-    new_positions = []
+    def _is_managed(ticker: str) -> bool:
+        return managed is None or _currency_of(ticker) in managed
+
+    # 管理対象外通貨のローカル建玉は温存し、管理対象はブローカーの実態で差し替え
+    preserved = [
+        p for p in local_data.get("positions", []) if not _is_managed(p["ticker"])
+    ]
+    new_positions = list(preserved)
     for pos in broker_positions:
         new_positions.append({
             "ticker": pos.ticker,
@@ -182,12 +205,18 @@ def _apply_sync(
             "take_profit": pos.take_profit,
         })
 
-    # 残高を更新
-    local_data["balance"] = {
-        "cash_jpy": float(broker_balance.get("cash_jpy", 0)),
-        "cash_usd": float(broker_balance.get("cash_usd", 0)),
+    # 残高: 管理対象通貨のみブローカー値で上書き、管理外 (例: USD) はローカルを温存
+    prev_balance = local_data.get("balance", {})
+    new_balance = {
+        "cash_jpy": float(prev_balance.get("cash_jpy", 0)),
+        "cash_usd": float(prev_balance.get("cash_usd", 0)),
         "timestamp": now,
     }
+    if managed is None or "JPY" in managed:
+        new_balance["cash_jpy"] = float(broker_balance.get("cash_jpy", 0))
+    if managed is None or "USD" in managed:
+        new_balance["cash_usd"] = float(broker_balance.get("cash_usd", 0))
+    local_data["balance"] = new_balance
     local_data["positions"] = new_positions
     local_data["metadata"] = local_data.get("metadata", {})
     local_data["metadata"]["last_updated"] = now
