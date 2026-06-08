@@ -1,4 +1,4 @@
-"""日次損失サーキットブレーカー / 総資産算出 / 集中超過警告のテスト (graph_trade)。"""
+"""日次損失サーキットブレーカー / 総資産算出 / 集中超過警告のテスト。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agents import graph_trade as gt  # noqa: E402
+from agents import portfolio_helpers as gt  # noqa: E402
 
 
 class _FakeDiary:
@@ -64,7 +64,7 @@ def test_total_equity_jpy(monkeypatch):
         trades=[],
     )
     # 現金100万 + 8306.T 500*3000=150万 = 250万
-    assert gt._total_equity_jpy() == 2_500_000
+    assert gt.total_equity_jpy() == 2_500_000
 
 
 def test_daily_loss_triggers_when_exceeded(monkeypatch):
@@ -77,7 +77,7 @@ def test_daily_loss_triggers_when_exceeded(monkeypatch):
         max_daily=2.0,
     )
     logged = []
-    assert gt._daily_loss_exceeded(logged.append) is True
+    assert gt.daily_loss_exceeded(logged.append) is True
     assert logged  # 理由がログされる
 
 
@@ -90,7 +90,7 @@ def test_daily_loss_ok_within_limit(monkeypatch):
         trades=[{"timestamp": _today_iso(), "pnl": -15_000}],
         max_daily=2.0,
     )
-    assert gt._daily_loss_exceeded(lambda *_: None) is False
+    assert gt.daily_loss_exceeded(lambda *_: None) is False
 
 
 def test_daily_loss_ignores_profit_and_old_trades(monkeypatch):
@@ -105,7 +105,7 @@ def test_daily_loss_ignores_profit_and_old_trades(monkeypatch):
         ],
         max_daily=2.0,
     )
-    assert gt._daily_loss_exceeded(lambda *_: None) is False
+    assert gt.daily_loss_exceeded(lambda *_: None) is False
 
 
 def test_overweight_warning_fires(monkeypatch):
@@ -118,5 +118,5 @@ def test_overweight_warning_fires(monkeypatch):
         max_pos=30.0,
     )
     logged = []
-    gt._warn_overweight_positions(logged.append)
+    gt.warn_overweight_positions(logged.append)
     assert any("集中超過" in m and "8306.T" in m for m in logged)

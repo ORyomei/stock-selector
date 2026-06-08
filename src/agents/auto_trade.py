@@ -49,9 +49,11 @@ from agents.ai import PROVIDER_NAMES, call_ai, parse_ai_json  # noqa: E402
 from agents.portfolio_helpers import (  # noqa: E402
     confidence_to_float,
     count_positions,
+    daily_loss_exceeded,
     get_held_positions,
     get_held_tickers,
     get_max_positions,
+    warn_overweight_positions,
 )
 from agents.runner import run_script, run_trade_cmd  # noqa: E402
 from infra.container import get_container
@@ -609,6 +611,13 @@ def run_cycle(
 
     if env_score <= EXTREME_BEARISH_THRESHOLD:
         log(f"\n  市場環境が極端に弱気 (score={env_score})。新規買いスキップ。")
+        _save_log(file_ts, lines, market, ai_used=use_ai)
+        return []
+
+    # 集中超過の警告 + 日次損失サーキットブレーカー (非LLM)
+    warn_overweight_positions(log)
+    if daily_loss_exceeded(log):
+        log("  → 日次損失上限を超過したため新規買いをスキップ")
         _save_log(file_ts, lines, market, ai_used=use_ai)
         return []
 

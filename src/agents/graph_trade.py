@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +20,11 @@ sys.path.insert(0, str(SRC_DIR))
 from agents.llm import get_chat_model
 from agents.portfolio_helpers import (
     count_positions,
+    daily_loss_exceeded,
     get_held_positions,
     get_held_tickers,
     get_max_positions,
+    warn_overweight_positions,
 )
 from agents.runner import run_trade_cmd
 from agents.tools import ALL_TOOLS
@@ -245,92 +247,6 @@ JSON ブロックがないと注文が実行されません。
 
 
 # ---------------------------------------------------------------------------
-# Portfolio risk helpers (non-LLM)
-# ---------------------------------------------------------------------------
-
-# 為替の概算レート (USD建ての総資産換算用。厳密な評価が必要なら要改善)
-_USD_JPY_APPROX = 150.0
-
-
-def _total_equity_jpy() -> float:
-    """総資産を JPY 概算で算出 (現金 + 建玉評価額)。日次損失・集中度の分母に使う。"""
-    pf = get_container().portfolio().load() or {}
-    bal = pf.get("balance", {})
-    equity = float(bal.get("cash_jpy", 0) or 0) + float(bal.get("cash_usd", 0) or 0) * _USD_JPY_APPROX
-    for p in pf.get("positions", []):
-        price = float(p.get("current_price") or p.get("entry_price") or 0)
-        val = price * int(p.get("quantity", 0) or 0)
-        if not str(p.get("ticker", "")).endswith(".T"):
-            val *= _USD_JPY_APPROX
-        equity += val
-    return equity
-
-
-def _today_realized_pnl() -> float:
-    """本日 (UTC日付) に確定した実現損益の合計。diary/trades の記録から集計する。"""
-    diary = get_container().diary()
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
-    total = 0.0
-    for t in diary.load_recent_trades(days=2):
-        if str(t.get("timestamp", ""))[:10] == today:
-            pnl = t.get("pnl")
-            if isinstance(pnl, int | float):
-                total += float(pnl)
-    return total
-
-
-def _daily_loss_exceeded(log: Any) -> bool:
-    """本日の実現損失が max_daily_loss_pct を超えたか (サーキットブレーカー)。"""
-    try:
-        from core.trade import load_risk_limits
-
-        max_daily = float(load_risk_limits().get("max_daily_loss_pct", 2))
-        realized = _today_realized_pnl()
-        if realized >= 0:
-            return False
-        equity = _total_equity_jpy()
-        if equity <= 0:
-            return False
-        loss_pct = abs(realized) / equity * 100
-        if loss_pct > max_daily:
-            log(
-                f"  日次実現損益 ¥{realized:,.0f} = 総資産の {loss_pct:.1f}% "
-                f"(上限 {max_daily}%) → 新規買い停止"
-            )
-            return True
-        return False
-    except Exception as e:
-        print(f"⚠️ daily-loss check skipped: {e}", file=sys.stderr)
-        return False
-
-
-def _warn_overweight_positions(log: Any) -> None:
-    """総資産に対する比率が max_position_size_pct を超える保有銘柄を警告する。"""
-    try:
-        from core.trade import load_risk_limits
-
-        max_pct = float(load_risk_limits().get("max_position_size_pct", 30))
-        equity = _total_equity_jpy()
-        if equity <= 0:
-            return
-        pf = get_container().portfolio().load() or {}
-        for p in pf.get("positions", []):
-            ticker = str(p.get("ticker", ""))
-            price = float(p.get("current_price") or p.get("entry_price") or 0)
-            val = price * int(p.get("quantity", 0) or 0)
-            if not ticker.endswith(".T"):
-                val *= _USD_JPY_APPROX
-            pct = val / equity * 100
-            if pct > max_pct:
-                log(
-                    f"  ⚠️ 集中超過: {ticker} が総資産の {pct:.0f}% "
-                    f"(上限 {max_pct:.0f}%) — 一部利確を検討"
-                )
-    except Exception as e:
-        print(f"⚠️ overweight check skipped: {e}", file=sys.stderr)
-
-
-# ---------------------------------------------------------------------------
 # Core graph execution
 # ---------------------------------------------------------------------------
 
@@ -382,7 +298,7 @@ def run_trade_graph(
     log(f"  -> シナリオ: {scenario} ({scen_label})  macro_score={macro_score}")
 
     # Step 1.6: ポートフォリオ健全性チェック (非LLM) — 集中超過の警告
-    _warn_overweight_positions(log)
+    warn_overweight_positions(log)
 
     # Step 2: ReAct agent analysis
     log("\nStep 2: AI分析エージェント起動...")
@@ -495,7 +411,7 @@ def run_trade_graph(
         rejected = invalid_sigs
 
     # Step 3.6: 日次損失サーキットブレーカー (非LLM) — 自動クローズは実行済みだが新規買いは止める
-    if signals and _daily_loss_exceeded(log):
+    if signals and daily_loss_exceeded(log):
         log("  → 日次損失上限を超過したため新規買いをスキップ")
         rejected = rejected + [
             {"ticker": s.get("ticker", "?"), "_gate_rejection_reason": "daily_loss_limit"}
