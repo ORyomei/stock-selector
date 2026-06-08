@@ -242,6 +242,22 @@ class KabuStationBroker(BrokerInterface):
         """kabu は日本株 (現物) のみ取り扱う → JPY のみ管理。"""
         return {"JPY"}
 
+    def get_trading_unit(self, ticker: str) -> int:
+        """kabu の銘柄情報 (/symbol の TradingUnit) から売買単位を取得する。
+
+        ETF は 1 口単位のことが多く、個別株 (100 株) 前提では誤るため
+        実際の単位をブローカーに問い合わせる。取得失敗時はデフォルトに戻す。
+        """
+        try:
+            symbol, exchange = self._parse_ticker(ticker, for_order=False)
+            data = self._request("GET", f"/symbol/{symbol}@{exchange}")
+            unit = int(data.get("TradingUnit", 0)) if data else 0
+            if unit > 0:
+                return unit
+        except Exception as exc:
+            logger.warning(f"get_trading_unit 失敗 ({ticker}): {exc}")
+        return 100 if ticker.endswith(".T") else 1
+
     def get_balance(self) -> dict[str, Any]:
         """買付余力を取得。"""
         data = self._request("GET", "/wallet/cash")

@@ -121,9 +121,13 @@ class RiskManager:
         value_cap_shares = int(max(0.0, remaining_allowance) / entry_price)
         position_size = min(position_size, value_cap_shares)
 
-        # 日本株は100株単位（単元株）に丸める
-        if currency == "JPY":
-            position_size = (position_size // 100) * 100
+        # 売買単位（単元）に丸める。単位はブローカーから取得し config に保持
+        # (日本株=100, ETF=1 口 等)。config に無ければ通貨ベースのデフォルト。
+        from core.trading_units import get_trading_unit
+
+        unit = get_trading_unit(ticker)
+        if unit > 1:
+            position_size = (position_size // unit) * unit
 
         return position_size
 

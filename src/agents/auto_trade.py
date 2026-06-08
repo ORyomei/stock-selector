@@ -469,14 +469,16 @@ def _run_swap_evaluation(
 
 
 def _order_cost(ticker: str, price: float) -> tuple[str, int, float]:
-    """ティッカーと価格から (通貨, 単元株数, 1ロットあたりコスト) を返す。
+    """ティッカーと価格から (通貨, 売買単位, 1ロットあたりコスト) を返す。
 
-    日本株は 100 株単位・JPY、それ以外は 1 株単位・USD。資金チェックを
-    通貨混在せず通貨ごとに行うために使う。
+    売買単位はブローカーから取得して config に保持した値を参照する
+    (ETF は 1 口単位等)。資金チェックを通貨混在せず通貨ごとに行うために使う。
     """
-    if ticker.endswith(".T"):
-        return "JPY", 100, price * 100
-    return "USD", 1, price
+    from core.trading_units import get_trading_unit
+
+    ccy = "JPY" if ticker.endswith(".T") else "USD"
+    unit = get_trading_unit(ticker)
+    return ccy, unit, price * unit
 
 
 def _cash_by_currency(pf_balance: dict[str, Any]) -> dict[str, float]:

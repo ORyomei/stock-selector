@@ -253,3 +253,11 @@ class BrokerInterface(ABC):
         (例: kabu は日本株のみ → ``{"JPY"}`` を返し、米国株/USD現金を消さない)。
         """
         return None
+
+    def get_trading_unit(self, ticker: str) -> int:
+        """銘柄の売買単位 (単元株数 / ETF の口数単位) を返す。
+
+        既定は通貨ベースの推定 (日本株=100, その他=1)。実ブローカーは
+        銘柄情報 API から正確な値を取得するためオーバーライドする。
+        """
+        return 100 if ticker.endswith(".T") else 1

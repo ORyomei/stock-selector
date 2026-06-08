@@ -370,6 +370,39 @@ def kabu_check(
     _json_out(result)
 
 
+# ── Trading Units ────────────────────────────────────────
+@app.command(name="trading-units")
+def trading_units(
+    tickers: Annotated[list[str] | None, typer.Argument(help="対象ティッカー (省略時は日本株ユニバース)")] = None,
+) -> None:
+    """ブローカー(kabu)から売買単位を取得し config/trading_units.json に保存."""
+    config_path = Path(__file__).resolve().parent.parent.parent / "config" / "trading_config.json"
+    with open(config_path) as f:
+        config = json.load(f)
+
+    if config.get("broker", "simulator") != "kabu":
+        typer.echo(
+            "❌ 売買単位の取得には kabu ブローカーが必要です "
+            "(simulator は銘柄情報を持たず、既存の設定を上書きしてしまうため拒否)",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    from core.trade import load_or_create_broker
+    from core.trading_units import refresh_trading_units
+
+    broker = load_or_create_broker(config)
+    if not tickers:
+        from core.screener import JP_UNIVERSE
+
+        tickers = list(JP_UNIVERSE)
+    units = refresh_trading_units(broker, tickers)
+    _json_out({
+        "fetched": {t: units.get(t) for t in tickers if t in units},
+        "total_stored": len(units),
+    })
+
+
 # ── Copilot Auth ─────────────────────────────────────────
 @app.command()
 def auth() -> None:
