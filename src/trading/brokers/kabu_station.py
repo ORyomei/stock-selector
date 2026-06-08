@@ -113,9 +113,9 @@ class KabuStationBroker(BrokerInterface):
             )
 
         # 発注用市場コード: SOR(9) が推奨。東証(1)は通常時の新規発注不可
-        self.order_exchange = config.get("order_exchange", EXCHANGE_SOR)
+        self.order_exchange = int(config.get("order_exchange", EXCHANGE_SOR))
         # 照会用市場コード (positions/board)
-        self.default_exchange = config.get("default_exchange", EXCHANGE_TOSHO)
+        self.default_exchange = int(config.get("default_exchange", EXCHANGE_TOSHO))
         self.account_type = config.get("account_type", ACCOUNT_TYPE_TOKUTEI)
         self.timeout = config.get("timeout", 10)
 
@@ -141,9 +141,10 @@ class KabuStationBroker(BrokerInterface):
             )
             resp.raise_for_status()
             data = resp.json()
-            self._token = data["Token"]
+            token = str(data["Token"])
+            self._token = token
             logger.info("kabu API トークン取得成功")
-            return self._token
+            return token
         except requests.RequestException as exc:
             raise KabuStationError(
                 f"kabu API トークン取得失敗: {exc}. "
@@ -431,11 +432,8 @@ class KabuStationBroker(BrokerInterface):
                 continue
             order_qty = int(item.get("OrderQty", 0))
             cum_qty = int(item.get("CumQty", 0) or 0)
-            if cum_qty > 0:
-                status = OrderStatus.FILLED
-            else:
-                # 約定なしで終了 = 取消 or 失効
-                status = OrderStatus.CANCELLED
+            # 約定なしで終了 = 取消 or 失効
+            status = OrderStatus.FILLED if cum_qty > 0 else OrderStatus.CANCELLED
 
             # 約定価格は Details から取得
             fill_price = None

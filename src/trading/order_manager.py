@@ -168,7 +168,7 @@ class OrderManager:
             return None
 
         # 注文数量を計算 (BUY / SELL)
-        quantity = self._calculate_quantity(signal, current_balance)
+        quantity = self._calculate_quantity(signal, current_balance, current_positions)
         if quantity <= 0:
             return None
 
@@ -199,6 +199,7 @@ class OrderManager:
         self,
         signal: TradingSignal,
         current_balance: dict,
+        current_positions: list | None = None,
     ) -> int:
         """信号から注文数量を計算
 
@@ -208,6 +209,7 @@ class OrderManager:
         Args:
             signal: TradingSignal
             current_balance: 残高辞書
+            current_positions: 現在の保有ポジション（評価額上限の算出に使用）
 
         Returns:
             注文数量（商品による。失敗時 0）
@@ -223,6 +225,7 @@ class OrderManager:
                     else signal.target_price,
                     stop_loss_price=signal.stop_loss_price,
                     confidence=signal.confidence,
+                    current_positions=current_positions,
                 )
                 return qty
             except Exception:

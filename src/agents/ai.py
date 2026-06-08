@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
 
 # Ensure project root is on path so infra can be imported
 SRC_DIR = Path(__file__).resolve().parent.parent.parent

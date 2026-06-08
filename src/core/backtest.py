@@ -13,7 +13,6 @@ SQLite の analyses テーブルから過去の推奨を取得し、
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any

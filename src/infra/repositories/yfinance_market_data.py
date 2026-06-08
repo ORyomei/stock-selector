@@ -35,7 +35,7 @@ class YFinanceMarketDataRepository(MarketDataRepository):
                     # (Volume だけ先に配信される Yahoo API の仕様)
                     # 末尾の NaN 行を除外して有効なデータのみ返す
                     if "Close" in hist.columns:
-                        hist = hist[hist["Close"].notna()]
+                        hist = hist.loc[hist["Close"].notna()]
                     if not hist.empty:
                         return hist
             except Exception as e:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -133,16 +132,16 @@ def _print_report(
     print("=" * 60)
 
     # Cash
-    print(f"\n💰 現金残高:")
+    print("\n💰 現金残高:")
     print(f"   ローカル:  ¥{local_cash:,.0f}")
     print(f"   ブローカー: ¥{broker_cash:,.0f}")
     if abs(cash_diff) > 1.0:
         print(f"   差分:       ¥{cash_diff:+,.0f} ⚠️")
     else:
-        print(f"   差分:       なし ✅")
+        print("   差分:       なし ✅")
 
     # Positions
-    print(f"\n📋 ポジション:")
+    print("\n📋 ポジション:")
     has_diff = False
     for d in diffs:
         if d.action == "MATCH":

@@ -47,11 +47,16 @@ class RiskManager:
         entry_price: float,
         stop_loss_price: float,
         confidence: float = 0.5,
+        current_positions: list[Position] | None = None,
     ) -> int:
         """ポジションサイズを計算する
 
         Kelly's formula 簡易版:
         position_size = (資金 × 許容損失%) / (entry_price - stop_loss_price)
+
+        ただし最終的に「建玉評価額 ≤ 総資産 × max_position_size_pct」を
+        ハード上限として強制する。Kelly 式は損切り幅が浅いと現金を超える
+        建玉を要求するため、この上限がないと 1 銘柄に資金が集中する。
 
         Args:
             balance: 残高辞書 {"cash_jpy": ..., "cash_usd": ...}
@@ -59,9 +64,11 @@ class RiskManager:
             entry_price: エントリー価格
             stop_loss_price: 損切り価格
             confidence: 確信度 (0.0 ~ 1.0) 高いほど大きなポジション
+            current_positions: 現在の保有ポジション。評価額上限の分母（総資産）
+                算出に使う。None の場合は現金のみを総資産とみなす。
 
         Returns:
-            ポジションサイズ（株数）
+            ポジションサイズ（株数）。評価額上限に既に達している場合は 0。
 
         Raises:
             ValueError: 無効な引数
@@ -96,6 +103,23 @@ class RiskManager:
         max_affordable = int(available_cash / entry_price) if entry_price > 0 else 0
         if max_affordable > 0:
             position_size = min(position_size, max_affordable)
+
+        # 評価額上限: 建玉評価額 ≤ 総資産(同一通貨) × max_position_size_pct を強制。
+        # 同一銘柄の買い増し時は既存建玉も合算して判定する。
+        same_ccy_positions = [
+            p
+            for p in (current_positions or [])
+            if self._get_currency(p.ticker) == currency
+        ]
+        holdings_value = sum(p.current_price * p.quantity for p in same_ccy_positions)
+        total_assets = available_cash + holdings_value
+        existing_same_ticker = sum(
+            p.current_price * p.quantity for p in same_ccy_positions if p.ticker == ticker
+        )
+        max_position_value = total_assets * (self.max_position_size_pct / 100)
+        remaining_allowance = max_position_value - existing_same_ticker
+        value_cap_shares = int(max(0.0, remaining_allowance) / entry_price)
+        position_size = min(position_size, value_cap_shares)
 
         # 日本株は100株単位（単元株）に丸める
         if currency == "JPY":

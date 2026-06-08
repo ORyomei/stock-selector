@@ -33,7 +33,7 @@ class CounterargumentGate:
         """
         if rules_path is None:
             rules_path = str(REPO_ROOT / "config" / "validation_rules.json")
-        
+
         self.rules_path = Path(rules_path)
         self.rules = self._load_rules()
         self.required_fields = self.rules.get("required_fields_in_signal", {})
@@ -54,7 +54,7 @@ class CounterargumentGate:
         try:
             with open(self.rules_path) as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"⚠️  Warning: Failed to load rules from {self.rules_path}: {e}")
             return {}
 
@@ -191,22 +191,22 @@ class CounterargumentGate:
         """
         valid_count = sum(1 for _, is_valid, _ in results if is_valid)
         total_count = len(results)
-        
+
         summary = f"## Gate Validation Results: {valid_count}/{total_count} passed\n\n"
-        
+
         valid_signals = [r for r in results if r[1]]
         invalid_signals = [r for r in results if not r[1]]
-        
+
         if valid_signals:
             summary += "### ✅ Passed\n"
-            for ticker, _, msg in valid_signals:
+            for _ticker, _, msg in valid_signals:
                 summary += f"- {msg}\n"
-        
+
         if invalid_signals:
             summary += "\n### ❌ Failed\n"
-            for ticker, _, msg in invalid_signals:
+            for _ticker, _, msg in invalid_signals:
                 summary += f"- {msg}\n"
-        
+
         return summary
 
 
@@ -229,16 +229,16 @@ def validate_signals_batch(
         - validation_details: All validation results for logging
     """
     gate = CounterargumentGate(rules_path=rules_path)
-    
+
     valid_signals: list[dict[str, Any]] = []
     invalid_signals: list[dict[str, Any]] = []
     validation_details: list[tuple[str, bool, str]] = []
-    
+
     for signal in signals:
         ticker = signal.get("ticker", "?")
         is_valid, summary, missing_fields = gate.validate_signal(signal, market_environment)
         validation_details.append((ticker, is_valid, summary))
-        
+
         if is_valid:
             valid_signals.append(signal)
         else:
@@ -246,5 +246,5 @@ def validate_signals_batch(
             invalid_sig["_gate_rejection_reason"] = summary
             invalid_sig["_missing_fields"] = missing_fields
             invalid_signals.append(invalid_sig)
-    
+
     return valid_signals, invalid_signals, validation_details

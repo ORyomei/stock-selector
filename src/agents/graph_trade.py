@@ -19,7 +19,6 @@ sys.path.insert(0, str(SRC_DIR))
 
 from agents.llm import get_chat_model
 from agents.portfolio_helpers import (
-    confidence_to_float,
     count_positions,
     get_held_positions,
     get_held_tickers,
@@ -27,7 +26,6 @@ from agents.portfolio_helpers import (
 )
 from agents.runner import run_trade_cmd
 from agents.tools import ALL_TOOLS
-
 from infra.container import get_container
 
 JST = timezone(timedelta(hours=9))
@@ -75,9 +73,10 @@ def _detect_scenario(macro_result: dict[str, Any] | None, scenarios_cfg: dict[st
 def _fetch_macro_safe() -> dict[str, Any] | None:
     """Fetch macro data without raising. Used for scenario routing."""
     try:
-        from core.macro import fetch_macro  # imported lazily to avoid slow startup
-        import io
         import contextlib
+        import io
+
+        from core.macro import fetch_macro  # imported lazily to avoid slow startup
 
         # fetch_macro prints JSON; capture to avoid log noise
         buf = io.StringIO()
@@ -349,7 +348,7 @@ def run_trade_graph(
             final_text = msg.content
             break
 
-    log(f"\n--- AI分析結果 ---")
+    log("\n--- AI分析結果 ---")
     log(final_text[:2000] if len(final_text) > 2000 else final_text)
 
     # Step 3: Parse signals from AI output (non-LLM)
@@ -398,7 +397,7 @@ def run_trade_graph(
         valid_sigs, invalid_sigs, details = _apply_counterargument_gate(
             signals, market_environment=market_env
         )
-        for ticker, is_valid, summary in details:
+        for _ticker, is_valid, summary in details:
             prefix = "  ✅" if is_valid else "  ❌"
             log(f"{prefix} {summary}")
         if invalid_sigs:
@@ -449,7 +448,7 @@ def run_trade_graph(
 def _extract_signals(ai_text: str, max_signals: int) -> list[dict[str, Any]]:
     """Parse trading signals from the AI's final text output."""
     from agents.ai import parse_ai_json
-    from core.screener import US_UNIVERSE, JP_UNIVERSE
+    from core.screener import JP_UNIVERSE, US_UNIVERSE
 
     # スクリーナーのユニバースに含まれるティッカーのみ許可
     _valid_tickers = set(US_UNIVERSE + JP_UNIVERSE)

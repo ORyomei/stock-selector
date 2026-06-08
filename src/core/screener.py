@@ -19,12 +19,11 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import math
 import sys
-from pathlib import Path
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any
 
 import ta

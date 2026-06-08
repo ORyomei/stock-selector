@@ -35,9 +35,9 @@ JST = timezone(timedelta(hours=9))
 
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(SRC_DIR))
-from infra.container import get_container
 from agents.ai import PROVIDER_NAMES, call_ai  # noqa: E402
 from agents.runner import run_script  # noqa: E402
+from infra.container import get_container
 
 # --- constants ------------------------------------------------------------
 
@@ -498,7 +498,7 @@ def run_analysis(
     sl = SPAN_LABELS_SHORT.get(span, span)
     ai_tag = "_AI" if ai_commentary else ""
     filename = f"{file_ts}_自動分析{ai_tag}_{ml}_{sl}.md"
-    get_container().diary().save_report(filename, report)
+    filepath = get_container().diary().save_report(filename, report)
 
     print(f"\n{'=' * 60}")
     print(f"  完了! diary/{filename}")

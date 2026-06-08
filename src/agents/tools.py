@@ -6,7 +6,6 @@ and returning a structured dict that the LLM can consume.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any

@@ -12,7 +12,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,7 +37,7 @@ def load_watchlist() -> list[dict]:
 
 def load_portfolio() -> dict[str, Any]:
     """ポートフォリオ読み込み"""
-    return get_container().portfolio().load()
+    return get_container().portfolio().load() or {}
 
 
 def check_ticker(ticker: str) -> dict | None:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
@@ -23,7 +23,6 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from infra.repositories.litellm_ai import AI_PROVIDERS
 
 litellm.suppress_debug_info = True
-litellm.set_verbose = False
 
 
 class LiteLLMChat(BaseChatModel):
@@ -46,7 +45,7 @@ class LiteLLMChat(BaseChatModel):
         *,
         tool_choice: Any = None,
         **kwargs: Any,
-    ) -> "LiteLLMChat":
+    ) -> LiteLLMChat:
         """Return a new instance with tools bound for every call."""
         from langchain_core.utils.function_calling import convert_to_openai_tool
 
@@ -86,7 +85,6 @@ class LiteLLMChat(BaseChatModel):
             call_kwargs["tool_choice"] = tool_choice
 
         resp = litellm.completion(**call_kwargs)
-        choice = resp.choices[0].message
 
         # GitHub Copilot API may split content and tool_calls across multiple
         # choices (e.g. choices[0] has text, choices[1] has tool_calls).
@@ -98,9 +96,10 @@ class LiteLLMChat(BaseChatModel):
             msg = c.message
             if msg.content:
                 content_parts.append(msg.content)
-            if getattr(msg, "tool_calls", None):
+            msg_tool_calls = getattr(msg, "tool_calls", None) or []
+            if msg_tool_calls:
                 import json as _json
-                for tc in msg.tool_calls:
+                for tc in msg_tool_calls:
                     args = tc.function.arguments
                     if isinstance(args, str):
                         args = _json.loads(args)
@@ -121,6 +120,7 @@ class LiteLLMChat(BaseChatModel):
 def _to_litellm_messages(messages: list[BaseMessage]) -> list[dict[str, Any]]:
     """Convert LangChain messages to LiteLLM (OpenAI-style) dicts."""
     import json as _json
+
     from langchain_core.messages import (
         AIMessage,
         HumanMessage,

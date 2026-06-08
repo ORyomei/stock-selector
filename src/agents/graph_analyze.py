@@ -18,7 +18,6 @@ sys.path.insert(0, str(SRC_DIR))
 
 from agents.llm import get_chat_model
 from agents.tools import ALL_TOOLS
-
 from infra.container import get_container
 
 JST = timezone(timedelta(hours=9))

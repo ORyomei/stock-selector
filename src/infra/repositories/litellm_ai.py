@@ -12,7 +12,6 @@ import litellm
 from interfaces.repositories.ai import AIRepository
 
 litellm.suppress_debug_info = True
-litellm.set_verbose = False
 
 AI_PROVIDERS: dict[str, dict[str, Any]] = {
     "copilot": {

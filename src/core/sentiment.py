@@ -9,7 +9,6 @@ Google News の日本語・英語両方のヘッドラインを統合して分�
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import contextlib
 import fcntl
 import json
 import os
@@ -44,7 +45,6 @@ JST = timezone(timedelta(hours=9))
 
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(SRC_DIR))
-from infra.container import get_container
 from agents.ai import PROVIDER_NAMES, call_ai, parse_ai_json  # noqa: E402
 from agents.portfolio_helpers import (  # noqa: E402
     confidence_to_float,
@@ -54,6 +54,7 @@ from agents.portfolio_helpers import (  # noqa: E402
     get_max_positions,
 )
 from agents.runner import run_script, run_trade_cmd  # noqa: E402
+from infra.container import get_container
 
 # --- constants ------------------------------------------------------------
 
@@ -85,6 +86,7 @@ def _daemonize() -> None:
         print(f"✅ デーモン起動 (PID={grandchild_pid})")
         print(f"   ログ: {DAEMON_LOG}")
         print(f"   停止: kill {grandchild_pid}")
+        sys.stdout.flush()  # os._exit はバッファを flush しないため明示的に
         os._exit(0)
 
     # Child: new session
@@ -107,6 +109,9 @@ def _daemonize() -> None:
     os.dup2(log_fd, sys.stdout.fileno())
     os.dup2(log_fd, sys.stderr.fileno())
     os.close(log_fd)
+    # 非TTYだと stdout がブロックバッファになり、ログが数時間滞留するため行バッファに切替
+    sys.stdout.reconfigure(line_buffering=True)  # type: ignore[union-attr]
+    sys.stderr.reconfigure(line_buffering=True)  # type: ignore[union-attr]
     # Close stdin
     devnull = os.open(os.devnull, os.O_RDONLY)
     os.dup2(devnull, sys.stdin.fileno())
@@ -137,10 +142,8 @@ def _release_lock() -> None:
         fcntl.flock(_lock_fd, fcntl.LOCK_UN)
         os.close(_lock_fd)
         _lock_fd = None
-    try:
+    with contextlib.suppress(OSError):
         LOCK_FILE.unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -773,23 +776,23 @@ def _should_skip_cycle(market: str) -> bool:
     minute = now.minute
     t = hour * 60 + minute
 
-    # 土日は全市場スキップ
-    if weekday >= 5:
-        return True
-
     jp_open = 8 * 60 + 30   # 08:30
     jp_close = 16 * 60       # 16:00
     us_open = 22 * 60        # 22:00 (JST)
     us_close = 6 * 60        # 06:00 (JST, 翌朝)
 
+    # 東証: 月〜金 08:30-16:00 JST
+    jp_active = weekday <= 4 and jp_open <= t <= jp_close
+    # 米国: 現地月〜金 = JST 月〜金 22:00〜 / 火〜土 〜06:00 (翌朝に跨ぐ)
+    # ※月曜 00:00-06:00 JST は米国日曜のため休場、土曜早朝は金曜セッション継続中
+    us_active = (weekday <= 4 and t >= us_open) or (1 <= weekday <= 5 and t <= us_close)
+
     if market == "jp":
-        return not (jp_open <= t <= jp_close)
+        return not jp_active
     elif market == "us":
-        return not (t >= us_open or t <= us_close)
+        return not us_active
     else:  # "all"
         # 日本か米国どちらかが開いていればOK
-        jp_active = jp_open <= t <= jp_close
-        us_active = t >= us_open or t <= us_close
         return not (jp_active or us_active)
 
 

@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -131,8 +131,8 @@ def sentiment(
 # ── Event Impact ─────────────────────────────────────────
 @app.command(name="event-impact")
 def event_impact(
-    query: Annotated[Optional[str], typer.Option(help="検索クエリ")] = None,
-    lang: Annotated[Optional[str], typer.Option(help="言語")] = None,
+    query: Annotated[str | None, typer.Option(help="検索クエリ")] = None,
+    lang: Annotated[str | None, typer.Option(help="言語")] = None,
     limit: Annotated[int, typer.Option(help="取得件数")] = 8,
     fmt: Annotated[str, typer.Option("--format", help="出力形式")] = "json",
 ) -> None:
@@ -151,7 +151,7 @@ def event_impact(
 def backtest(
     days: Annotated[int, typer.Option(help="検証日数")] = 5,
     min_score: Annotated[int, typer.Option(help="最低スコア")] = 0,
-    ticker: Annotated[Optional[str], typer.Option(help="銘柄絞り込み")] = None,
+    ticker: Annotated[str | None, typer.Option(help="銘柄絞り込み")] = None,
 ) -> None:
     """過去推奨の的中率バックテスト."""
     from core.backtest import run_backtest
@@ -162,7 +162,7 @@ def backtest(
 # ── Alert ────────────────────────────────────────────────
 @app.command()
 def alert(
-    ticker: Annotated[Optional[str], typer.Option(help="個別銘柄指定")] = None,
+    ticker: Annotated[str | None, typer.Option(help="個別銘柄指定")] = None,
     check_portfolio: Annotated[bool, typer.Option("--check-portfolio", help="保有銘柄チェック")] = False,
 ) -> None:
     """ウォッチリスト・ポートフォリオのアラート検知."""
@@ -175,11 +175,11 @@ def alert(
 @app.command()
 def portfolio(
     command: Annotated[str, typer.Argument(help="status|buy|sell|performance|reconcile")],
-    ticker: Annotated[Optional[str], typer.Argument(help="銘柄")] = None,
-    shares: Annotated[Optional[int], typer.Argument(help="株数")] = None,
-    price: Annotated[Optional[float], typer.Argument(help="価格")] = None,
-    stop_loss: Annotated[Optional[float], typer.Option(help="損切りライン")] = None,
-    take_profit: Annotated[Optional[float], typer.Option(help="利確ライン")] = None,
+    ticker: Annotated[str | None, typer.Argument(help="銘柄")] = None,
+    shares: Annotated[int | None, typer.Argument(help="株数")] = None,
+    price: Annotated[float | None, typer.Argument(help="価格")] = None,
+    stop_loss: Annotated[float | None, typer.Option(help="損切りライン")] = None,
+    take_profit: Annotated[float | None, typer.Option(help="利確ライン")] = None,
     apply: Annotated[bool, typer.Option("--apply", help="照合結果をローカルに反映")] = False,
 ) -> None:
     """ポートフォリオ管理."""
@@ -193,10 +193,10 @@ def portfolio(
     )
 
     if command == "reconcile":
+        import json
+
         from core.reconcile import reconcile
         from core.trade import load_or_create_broker
-
-        import json
         config_path = Path(__file__).resolve().parent.parent.parent / "config" / "trading_config.json"
         with open(config_path) as f:
             config = json.load(f)
@@ -233,11 +233,11 @@ def portfolio(
 # ── Trade ────────────────────────────────────────────────
 @app.command()
 def trade(
-    from_signal: Annotated[Optional[str], typer.Option("--from-signal", help="シグナルファイル")] = None,
+    from_signal: Annotated[str | None, typer.Option("--from-signal", help="シグナルファイル")] = None,
     check_positions: Annotated[bool, typer.Option("--check-positions", help="ポジション確認")] = False,
     check_and_close: Annotated[bool, typer.Option("--check-and-close", help="ポジション確認+クローズ")] = False,
-    close_ticker: Annotated[Optional[str], typer.Option("--close", help="クローズ銘柄")] = None,
-    close_qty: Annotated[Optional[int], typer.Option("--close-qty", help="クローズ数量")] = None,
+    close_ticker: Annotated[str | None, typer.Option("--close", help="クローズ銘柄")] = None,
+    close_qty: Annotated[int | None, typer.Option("--close-qty", help="クローズ数量")] = None,
 ) -> None:
     """トレード実行."""
     from core.trade import (
@@ -280,14 +280,14 @@ def auto_trade(
     dry_run: Annotated[bool, typer.Option(help="ドライラン")] = False,
     ai: Annotated[bool, typer.Option("--ai", help="AI判断有効")] = False,
     ai_provider: Annotated[str, typer.Option(help="AIプロバイダー")] = "copilot",
-    ai_model: Annotated[Optional[str], typer.Option(help="AIモデル")] = None,
+    ai_model: Annotated[str | None, typer.Option(help="AIモデル")] = None,
     daemon: Annotated[bool, typer.Option(help="デーモンモード（自動バックグラウンド化）")] = False,
     foreground: Annotated[bool, typer.Option("--fg", help="デーモンをフォアグラウンドで実行")] = False,
     interval: Annotated[int, typer.Option(help="実行間隔(秒)")] = 1800,
     legacy: Annotated[bool, typer.Option(help="レガシーモード")] = False,
 ) -> None:
     """自動売買ループ."""
-    from agents.auto_trade import daemon_loop, run_cycle, _acquire_lock, _release_lock
+    from agents.auto_trade import _acquire_lock, _release_lock, daemon_loop, run_cycle
 
     if daemon:
         daemon_loop(
@@ -325,7 +325,7 @@ def auto_analyze(
     depth: Annotated[str, typer.Option(help="分析深度")] = "standard",
     ai: Annotated[bool, typer.Option("--ai", help="AI分析有効")] = False,
     ai_provider: Annotated[str, typer.Option(help="AIプロバイダー")] = "copilot",
-    ai_model: Annotated[Optional[str], typer.Option(help="AIモデル")] = None,
+    ai_model: Annotated[str | None, typer.Option(help="AIモデル")] = None,
     daemon: Annotated[bool, typer.Option(help="デーモンモード")] = False,
     interval: Annotated[int, typer.Option(help="実行間隔(秒)")] = 1800,
     legacy: Annotated[bool, typer.Option(help="レガシーモード")] = False,
@@ -370,6 +370,30 @@ def kabu_check(
     _json_out(result)
 
 
+# ── Copilot Auth ─────────────────────────────────────────
+@app.command()
+def auth() -> None:
+    """GitHub Copilot 認証（device flow でトークン取得・更新）."""
+    import litellm
+
+    from infra.repositories.litellm_ai import AI_PROVIDERS
+
+    litellm.suppress_debug_info = False
+
+    typer.echo("GitHub Copilot 認証を開始します...")
+    typer.echo("コードが表示されたら https://github.com/login/device に入力してください\n")
+    try:
+        litellm.completion(
+            model=AI_PROVIDERS["copilot"]["model"],
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=5,
+        )
+    except Exception as e:
+        typer.echo(f"\n❌ 認証失敗: {e}", err=True)
+        raise typer.Exit(1) from None
+    typer.echo("\n✅ 認証成功！トークンが保存され、デーモンはそのまま利用できます。")
+
+
 # ── Daemon Stop ──────────────────────────────────────────
 @app.command(name="stop")
 def stop_daemon() -> None:
@@ -385,7 +409,7 @@ def stop_daemon() -> None:
         pid = int(lock_file.read_text().strip())
     except (ValueError, OSError):
         typer.echo("❌ PID を読み取れません")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     # プロセス存在確認
     try:
@@ -393,7 +417,7 @@ def stop_daemon() -> None:
     except ProcessLookupError:
         typer.echo(f"❌ PID {pid} のプロセスは存在しません（既に停止済み）")
         lock_file.unlink(missing_ok=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     os.kill(pid, sig.SIGTERM)
     typer.echo(f"✅ デーモン停止シグナル送信 (PID={pid})")
