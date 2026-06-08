@@ -466,6 +466,24 @@ def _run_swap_evaluation(
     return executed
 
 
+def _order_cost(ticker: str, price: float) -> tuple[str, int, float]:
+    """ティッカーと価格から (通貨, 単元株数, 1ロットあたりコスト) を返す。
+
+    日本株は 100 株単位・JPY、それ以外は 1 株単位・USD。資金チェックを
+    通貨混在せず通貨ごとに行うために使う。
+    """
+    if ticker.endswith(".T"):
+        return "JPY", 100, price * 100
+    return "USD", 1, price
+
+
+def _cash_by_currency(pf_balance: dict[str, Any]) -> dict[str, float]:
+    return {
+        "JPY": float(pf_balance.get("cash_jpy", 0) or 0),
+        "USD": float(pf_balance.get("cash_usd", 0) or 0),
+    }
+
+
 def _execute_swap(
     sell_ticker: str,
     sell_qty: int,
@@ -476,29 +494,28 @@ def _execute_swap(
     """Sell one position and buy a replacement."""
     executed: list[dict[str, Any]] = []
 
-    # 事前チェック: 売却後に新規購入できるか？
+    # 事前チェック: 売却後に新規購入できるか？（通貨混在を避ける）
     pf_data = get_container().portfolio().load() or {}
     pf_balance = pf_data.get("balance", {})
-    cash_now = pf_balance.get("cash_jpy", 0) + pf_balance.get("cash_usd", 0) * 150
+    cash = _cash_by_currency(pf_balance)
 
-    # 売却で回収できる見込み額
+    buy_ticker = buy_info["ticker"]
+    buy_ccy, _buy_lot, buy_cost = _order_cost(buy_ticker, buy_info["current_price"])
+    sell_ccy = "JPY" if sell_ticker.endswith(".T") else "USD"
+
+    # 売却で回収できる見込み額（買付と同一通貨のときのみ買付余力に加算できる）
     sell_pos_data = next(
         (p for p in pf_data.get("positions", []) if p.get("ticker") == sell_ticker), None
     )
     sell_proceeds = sell_pos_data["current_price"] * sell_qty if sell_pos_data else 0
+    proceeds_for_buy = sell_proceeds if sell_ccy == buy_ccy else 0
 
-    # 新規購入に必要な額
-    buy_price = buy_info["current_price"]
-    buy_ticker = buy_info["ticker"]
-    buy_lot = 100 if buy_ticker.endswith(".T") else 1
-    buy_cost = buy_price * buy_lot
-
-    cash_after_swap = cash_now + sell_proceeds
+    cash_after_swap = cash[buy_ccy] + proceeds_for_buy
     if buy_cost > cash_after_swap:
+        note = "" if sell_ccy == buy_ccy else f"（{sell_ccy}売却益は{buy_ccy}買付に充当不可）"
         log(
-            f"  ⛔ SWAP中止: 売却後も資金不足"
-            f" (売却見込¥{sell_proceeds:,.0f} + 残高¥{cash_now:,.0f} = ¥{cash_after_swap:,.0f}"
-            f" < 必要¥{buy_cost:,.0f})"
+            f"  ⛔ SWAP中止: 売却後も{buy_ccy}資金不足{note}"
+            f" (充当可能 {cash_after_swap:,.0f} {buy_ccy} < 必要 {buy_cost:,.0f} {buy_ccy})"
         )
         return executed
 
@@ -713,11 +730,11 @@ def run_cycle(
         else:
             log("  AI判断失敗 -> ルールベースにフォールバック")
 
-    # Build signals (with cash check → swap fallback)
+    # Build signals (通貨ごとの資金チェック → 不足なら入れ替え候補へ)
     pf_data = get_container().portfolio().load() or {}
     pf_balance = pf_data.get("balance", {})
-    remaining_cash = pf_balance.get("cash_jpy", 0) + pf_balance.get("cash_usd", 0) * 150
-    log(f"\n  残高: ¥{remaining_cash:,.0f}")
+    cash = _cash_by_currency(pf_balance)
+    log(f"\n  残高: ¥{cash['JPY']:,.0f} / ${cash['USD']:,.0f}")
     signals: list[dict[str, Any]] = []
     swap_candidates: list[dict[str, Any]] = []  # 資金不足で買えなかった良い候補
     for s in scored:
@@ -731,19 +748,20 @@ def run_cycle(
                 log(f"  ⛔ {ticker}: AI skip -> シグナル除外")
                 continue
 
-        # 資金不足チェック
-        price = s["current_price"]
-        lot = 100 if ticker.endswith(".T") else 1
-        est_cost = price * lot
-        if est_cost > remaining_cash:
-            log(f"  💰 {ticker}: 資金不足 (必要≈¥{est_cost:,.0f}, 残高¥{remaining_cash:,.0f}) -> 入れ替え候補へ")
+        # 資金不足チェック (その銘柄の通貨の現金で判定。通貨混在しない)
+        ccy, _lot, est_cost = _order_cost(ticker, s["current_price"])
+        if est_cost > cash[ccy]:
+            log(
+                f"  💰 {ticker}: {ccy}資金不足 "
+                f"(必要≈{est_cost:,.0f} {ccy}, 残高{cash[ccy]:,.0f} {ccy}) -> 入れ替え候補へ"
+            )
             swap_candidates.append(s)
             continue
 
         reason = f"auto_trade{'[AI]' if use_ai else ''}: score={s['score']}, {s['action']}"
         sig = _make_signal(s, reason)
         signals.append(sig)
-        remaining_cash -= est_cost
+        cash[ccy] -= est_cost
 
     # Step 6: execute new buys
     executed: list[dict[str, Any]] = []

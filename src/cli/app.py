@@ -274,7 +274,7 @@ def trade(
 # ── Auto Trade ───────────────────────────────────────────
 @app.command(name="auto-trade")
 def auto_trade(
-    market: Annotated[str, typer.Option(help="対象市場")] = "all",
+    market: Annotated[str, typer.Option(help="対象市場")] = "jp",
     min_score: Annotated[int, typer.Option(help="最低スコア")] = 10,
     max_signals: Annotated[int, typer.Option(help="最大シグナル数")] = 2,
     dry_run: Annotated[bool, typer.Option(help="ドライラン")] = False,
