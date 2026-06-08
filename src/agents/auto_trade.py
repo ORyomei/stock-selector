@@ -47,12 +47,14 @@ sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(SRC_DIR))
 from agents.ai import PROVIDER_NAMES, call_ai, parse_ai_json  # noqa: E402
 from agents.portfolio_helpers import (  # noqa: E402
+    USD_JPY_APPROX,
     confidence_to_float,
     count_positions,
     daily_loss_exceeded,
     get_held_positions,
     get_held_tickers,
     get_max_positions,
+    total_equity_jpy,
     warn_overweight_positions,
 )
 from agents.runner import run_script, run_trade_cmd  # noqa: E402
@@ -735,6 +737,17 @@ def run_cycle(
     pf_balance = pf_data.get("balance", {})
     cash = _cash_by_currency(pf_balance)
     log(f"\n  残高: ¥{cash['JPY']:,.0f} / ${cash['USD']:,.0f}")
+
+    # 評価額上限の事前フィルタ用 (1単元が 30% を超える高額銘柄は約定時 qty=0 になるため
+    # ここで弾いて発注枠の空費と spurious な FAILED ログを防ぐ)
+    equity_jpy = total_equity_jpy()
+    try:
+        from core.trade import load_risk_limits
+        max_pos_pct = float(load_risk_limits().get("max_position_size_pct", 30))
+    except Exception:
+        max_pos_pct = 30.0
+    max_pos_value_jpy = equity_jpy * max_pos_pct / 100 if equity_jpy > 0 else 0.0
+
     signals: list[dict[str, Any]] = []
     swap_candidates: list[dict[str, Any]] = []  # 資金不足で買えなかった良い候補
     for s in scored:
@@ -756,6 +769,15 @@ def run_cycle(
                 f"(必要≈{est_cost:,.0f} {ccy}, 残高{cash[ccy]:,.0f} {ccy}) -> 入れ替え候補へ"
             )
             swap_candidates.append(s)
+            continue
+
+        # 評価額上限チェック: 1単元が総資産の max_position_size_pct を超える銘柄は買えない
+        cap_in_ccy = max_pos_value_jpy if ccy == "JPY" else max_pos_value_jpy / USD_JPY_APPROX
+        if max_pos_value_jpy > 0 and est_cost > cap_in_ccy:
+            log(
+                f"  📏 {ticker}: 1単元(≈{est_cost:,.0f} {ccy})が評価額上限"
+                f"({max_pos_pct:.0f}%≈{cap_in_ccy:,.0f} {ccy})超 -> スキップ"
+            )
             continue
 
         reason = f"auto_trade{'[AI]' if use_ai else ''}: score={s['score']}, {s['action']}"
