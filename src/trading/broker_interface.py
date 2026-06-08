@@ -113,17 +113,22 @@ class Position:
 
     stop_loss: float | None = None
     take_profit: float | None = None
+    peak_price: float | None = None  # 取得後の最高値（トレーリングストップ用）
     pnl: float = field(default=0.0, init=False)
     pnl_pct: float = field(default=0.0, init=False)
 
     def __post_init__(self):
-        """pnl を計算"""
+        """pnl を計算し、未設定の高値を初期化"""
         self.pnl = (self.current_price - self.entry_price) * self.quantity
         self.pnl_pct = (
             ((self.current_price - self.entry_price) / self.entry_price * 100)
             if self.entry_price != 0
             else 0.0
         )
+        # 高値 (トレーリングストップ用) は最低でも取得価格・現在値を下回らない
+        seed = max(self.entry_price, self.current_price)
+        if self.peak_price is None or self.peak_price < seed:
+            self.peak_price = seed
 
     def to_dict(self) -> dict[str, Any]:
         """JSON シリアライズ用"""
@@ -135,6 +140,7 @@ class Position:
             "entry_time": self.entry_time.isoformat(),
             "stop_loss": self.stop_loss,
             "take_profit": self.take_profit,
+            "peak_price": self.peak_price,
             "pnl": round(self.pnl, 2),
             "pnl_pct": round(self.pnl_pct, 2),
         }

@@ -203,6 +203,7 @@ def _apply_sync(
             "entry_time": pos.entry_time.isoformat() if pos.entry_time else now,
             "stop_loss": pos.stop_loss,
             "take_profit": pos.take_profit,
+            "peak_price": pos.peak_price,
         })
 
     # 残高: 管理対象通貨のみブローカー値で上書き、管理外 (例: USD) はローカルを温存

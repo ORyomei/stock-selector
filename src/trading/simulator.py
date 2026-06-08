@@ -342,6 +342,7 @@ class BrokerSimulator(BrokerInterface):
                     "entry_time": pos.entry_time.isoformat(),
                     "stop_loss": pos.stop_loss,
                     "take_profit": pos.take_profit,
+                    "peak_price": pos.peak_price,
                 }
                 for pos in self._positions
             ],
@@ -440,6 +441,7 @@ class BrokerSimulator(BrokerInterface):
                 entry_time=entry_time,
                 stop_loss=pos_data.get("stop_loss"),
                 take_profit=pos_data.get("take_profit"),
+                peak_price=self._finite_float(pos_data.get("peak_price"), entry_price),
             )
             self._positions.append(pos)
 

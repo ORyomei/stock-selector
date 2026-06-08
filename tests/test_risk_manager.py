@@ -109,3 +109,52 @@ def test_none_positions_falls_back_to_cash():
         current_positions=None,
     )
     assert qty * 2000.0 <= cash * PCT / 100 + 2000.0
+
+
+# ── トレーリングストップ (高値追従) ──────────────────────────────
+
+
+def _held(entry, current, peak, stop_loss=None, take_profit=None):
+    return Position(
+        ticker="7203.T", quantity=100, entry_price=entry, current_price=current,
+        entry_time=datetime.now(UTC), stop_loss=stop_loss, take_profit=take_profit,
+        peak_price=peak,
+    )
+
+
+def test_trailing_stop_locks_profit_from_peak():
+    """高値 1300 から 2% 逆行 (≤1274) で利益確定。旧実装(取得価×0.98=980)では発火しなかった。"""
+    rm = RiskManager({"max_position_size_pct": PCT, "trailing_stop_pct": 2})
+    pos = _held(entry=1000, current=1270, peak=1300, stop_loss=900, take_profit=2000)
+    should, reason = rm.should_close_position(pos, 1270)
+    assert should and reason == "trailing_stop"
+
+
+def test_trailing_stop_does_not_fire_above_level():
+    """高値近辺 (1290 > 1274) ではまだ発火しない。"""
+    rm = RiskManager({"max_position_size_pct": PCT, "trailing_stop_pct": 2})
+    pos = _held(entry=1000, current=1290, peak=1300, stop_loss=900, take_profit=2000)
+    should, _ = rm.should_close_position(pos, 1290)
+    assert not should
+
+
+def test_trailing_stop_inactive_before_profit():
+    """含み益が乗る前 (高値≒取得価) はトレーリングが発火せず、通常の損切りに委ねる。"""
+    rm = RiskManager({"max_position_size_pct": PCT, "trailing_stop_pct": 2})
+    # peak=1010, trailing_level=989.8 < entry(1000) → トレーリング発動条件を満たさない
+    pos = _held(entry=1000, current=992, peak=1010, stop_loss=950, take_profit=2000)
+    should, _ = rm.should_close_position(pos, 992)
+    assert not should  # entry-2% 程度では即クローズしない (旧バグの挙動を防ぐ)
+
+
+def test_peak_price_ratchets_up_not_down():
+    """__post_init__ で高値は切り上がり、下落では下がらない。"""
+    pos = Position(ticker="X", quantity=1, entry_price=1000, current_price=1000,
+                   entry_time=datetime.now(UTC))
+    assert pos.peak_price == 1000
+    pos.current_price = 1300
+    pos.__post_init__()
+    assert pos.peak_price == 1300
+    pos.current_price = 1100
+    pos.__post_init__()
+    assert pos.peak_price == 1300  # 下落しても高値は維持

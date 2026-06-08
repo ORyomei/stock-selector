@@ -199,9 +199,13 @@ class RiskManager:
         if position.take_profit and current_price >= position.take_profit:
             return True, "take_profit"
 
-        # 3. トレーリングストップ（高値からの下落幅）
-        trailing_stop = position.entry_price * (1 - self.trailing_stop_pct / 100)
-        if current_price <= trailing_stop and pnl_pct < 0:
+        # 3. トレーリングストップ（取得後の高値からの下落で利益を確定）
+        #    peak_price は取得後に更新される高値。高値から trailing_stop_pct% 逆行で発動。
+        #    含み益が乗る前（高値が浅い）は通常の損切りラインが機能するよう、
+        #    トレーリング水準が取得価格以上になっている場合のみ発動する。
+        peak = max(position.peak_price or position.entry_price, current_price)
+        trailing_level = peak * (1 - self.trailing_stop_pct / 100)
+        if trailing_level >= position.entry_price and current_price <= trailing_level:
             return True, "trailing_stop"
 
         # 4. 大幅損失ガード（-5% 以上で自動損切り）
