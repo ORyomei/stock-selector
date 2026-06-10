@@ -15,6 +15,7 @@ from pathlib import Path
 
 from dependency_injector import containers, providers
 
+from infra.brokers.factory import create_broker
 from infra.repositories.file_diary import FileDiaryRepository
 from infra.repositories.google_news import GoogleNewsRepository
 from infra.repositories.json_config import JsonConfigRepository
@@ -72,6 +73,14 @@ class RepositoryContainer(containers.DeclarativeContainer):
     analysis_db = providers.Singleton(
         SQLiteAnalysisRepository,
         db_path=DB_FILE,
+    )
+
+    # ブローカーはプロセス内で単一インスタンスを共有 (状態の唯一の所有者)。
+    # trading_config.json に応じて simulator / kabu を構築する。
+    broker = providers.Singleton(
+        create_broker,
+        config_repo=config_repo,
+        portfolio_repo=portfolio,
     )
 
 

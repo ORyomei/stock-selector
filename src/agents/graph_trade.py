@@ -251,7 +251,11 @@ def run_trade_graph(
     log(f"  dry_run={dry_run}  provider={provider}")
     log(f"{'=' * 60}\n")
 
-    # Step 0: ブローカー同期 (kabu モード時のみ。simulator では no-op)
+    # Step 0: ブローカー状態を同期 (単一インスタンスの鮮度確保)。
+    #   simulator: portfolio.json 再読込 (別プロセスの CLI 変更を取り込む)
+    #   kabu: 証券会社 API から再取得
+    get_container().broker().sync()
+    # kabu モード時はローカル portfolio.json をブローカー実態に reconcile
     from agents.auto_trade import _reconcile_if_needed
 
     _reconcile_if_needed(log)

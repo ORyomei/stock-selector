@@ -27,7 +27,6 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from domain.models import OrderSide, OrderType
-from infra.brokers import BrokerSimulator
 from trading import (
     OrderManager,
     RiskManager,
@@ -51,33 +50,14 @@ def load_risk_limits() -> dict[str, Any]:
     return get_container().config_repo().load_risk_limits()
 
 
-def load_or_create_broker(config: dict):
-    """設定の "broker" に応じてブローカーを生成・復元する。
+def load_or_create_broker(config: dict | None = None):
+    """プロセス内で共有するブローカー (DIコンテナのシングルトン) を返す。
 
-    "simulator" (default): BrokerSimulator (仮想売買)
-    "kabu": KabuStationBroker (auカブコム kabuステーション API)
+    生成ロジックは infra/brokers/factory.create_broker に集約。trading_config に
+    応じて simulator / kabu を一度だけ構築し、以降は同一インスタンスを共有する
+    (ブローカーが状態の唯一の所有者)。引数 config は後方互換のため受けるが未使用。
     """
-    broker_name = (config.get("broker") or "simulator").lower()
-
-    if broker_name == "kabu":
-        from infra.brokers import KabuStationBroker
-
-        broker = KabuStationBroker(config["kabu"])
-        # 接続確認
-        broker.sync()
-        print(f"✅ kabuステーション API 接続成功 (sandbox={config['kabu'].get('sandbox', False)})")
-        return broker
-
-    # default: simulator — repo を注入し、ミューテーション毎に自己永続化させる
-    portfolio_repo = get_container().portfolio()
-    broker = BrokerSimulator(config["simulator"], repo=portfolio_repo)
-    portfolio_data = portfolio_repo.load()
-    if portfolio_data and (portfolio_data.get("positions") or portfolio_data.get("holdings")):
-        broker.from_dict(portfolio_data)
-        print("✅ ポートフォリオ復元")
-    else:
-        print("⚠️  ポートフォリオファイルなし - 初期状態で開始")
-    return broker
+    return get_container().broker()
 
 
 def _normalize_action(raw: str) -> TradeAction:
