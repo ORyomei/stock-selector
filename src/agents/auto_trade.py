@@ -857,6 +857,7 @@ def daemon_loop(
     ai_provider: str,
     ai_model: str | None,
     foreground: bool = False,
+    legacy: bool = False,
 ) -> None:
     # ロック取得を先に行う（fork前）→ 2重起動を即座にブロック
     _acquire_lock()
@@ -872,10 +873,13 @@ def daemon_loop(
     atexit.register(_release_lock)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
-    print(f"デーモンモード: {interval}s ({interval // 60}min) ごとに自動実行")
+    engine = "legacy 固定パイプライン" if legacy else "LangGraph Agent"
+    print(f"デーモンモード ({engine}): {interval}s ({interval // 60}min) ごとに自動実行")
     print(f"  market={market}  min_score={min_score}  max_signals={max_signals}  dry_run={dry_run}")
-    if use_ai:
+    if legacy and use_ai:
         print(f"  AI: {ai_provider} (model: {ai_model or 'default'})")
+    if not legacy:
+        print(f"  LLM: {ai_provider} (model: {ai_model or 'default'})")
     print(f"  PID={os.getpid()}")
     if foreground:
         print("  Ctrl+C で停止\n")
@@ -900,7 +904,19 @@ def daemon_loop(
 
         print(f"\n### サイクル #{cycle} ###")
         try:
-            run_cycle(market, min_score, max_signals, dry_run, use_ai, ai_provider, ai_model)
+            if legacy:
+                run_cycle(market, min_score, max_signals, dry_run, use_ai, ai_provider, ai_model)
+            else:
+                from agents.graph_trade import run_trade_graph
+
+                run_trade_graph(
+                    market=market,
+                    min_score=min_score,
+                    max_signals=max_signals,
+                    dry_run=dry_run,
+                    provider=ai_provider,
+                    model=ai_model,
+                )
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr)
         print(f"\n次回: {interval}s後 ({interval // 60}min後)")

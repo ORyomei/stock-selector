@@ -31,8 +31,10 @@ from agents.tools import ALL_TOOLS
 from infra.container import get_container
 
 JST = timezone(timedelta(hours=9))
-DIARY_DIR = Path(__file__).resolve().parent.parent.parent.parent / "diary"
-CONFIG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "config"
+# __file__ = src/agents/graph_trade.py → 3 つ上がプロジェクトルート
+# (旧 src/scripts/lib/ 時代の 4 階層が残っていて config が読めていなかった)
+DIARY_DIR = Path(__file__).resolve().parent.parent.parent / "diary"
+CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
 PROMPT_SCENARIOS_PATH = CONFIG_DIR / "prompt_scenarios.json"
 
 
@@ -275,6 +277,11 @@ def run_trade_graph(
     log(f"  market={market}  min_score={min_score}  max_signals={max_signals}")
     log(f"  dry_run={dry_run}  provider={provider}")
     log(f"{'=' * 60}\n")
+
+    # Step 0: ブローカー同期 (kabu モード時のみ。simulator では no-op)
+    from agents.auto_trade import _reconcile_if_needed
+
+    _reconcile_if_needed(log)
 
     # Step 1: Auto-close (non-LLM — safety-critical)
     log("Step 1: 自動クローズ判定...")

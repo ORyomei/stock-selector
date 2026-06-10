@@ -287,7 +287,7 @@ def auto_trade(
     interval: Annotated[int, typer.Option(help="実行間隔(秒)")] = 1800,
     legacy: Annotated[bool, typer.Option(help="レガシーモード")] = False,
 ) -> None:
-    """自動売買ループ."""
+    """自動売買ループ (デフォルト: LangGraph Agent。--legacy で固定パイプライン)."""
     from agents.auto_trade import _acquire_lock, _release_lock, daemon_loop, run_cycle
 
     if daemon:
@@ -301,19 +301,32 @@ def auto_trade(
             ai_provider=ai_provider,
             ai_model=ai_model,
             foreground=foreground,
+            legacy=legacy,
         )
     else:
         _acquire_lock()
         try:
-            run_cycle(
-                market=market,
-                min_score=min_score,
-                max_signals=max_signals,
-                dry_run=dry_run,
-                use_ai=ai,
-                ai_provider=ai_provider,
-                ai_model=ai_model,
-            )
+            if legacy:
+                run_cycle(
+                    market=market,
+                    min_score=min_score,
+                    max_signals=max_signals,
+                    dry_run=dry_run,
+                    use_ai=ai,
+                    ai_provider=ai_provider,
+                    ai_model=ai_model,
+                )
+            else:
+                from agents.graph_trade import run_trade_graph
+
+                run_trade_graph(
+                    market=market,
+                    min_score=min_score,
+                    max_signals=max_signals,
+                    dry_run=dry_run,
+                    provider=ai_provider,
+                    model=ai_model,
+                )
         finally:
             _release_lock()
 

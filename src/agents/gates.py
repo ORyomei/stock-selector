@@ -17,7 +17,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SRC_DIR = Path(__file__).resolve().parent.parent.parent
+# __file__ = src/agents/gates.py → src は 2 つ上、プロジェクトルートは 3 つ上
+# (旧レイアウトの階層数が残り REPO_ROOT がリポジトリ外を指して validation_rules.json が読めていなかった)
+SRC_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = SRC_DIR.parent
 sys.path.insert(0, str(SRC_DIR))
 
