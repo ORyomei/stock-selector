@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from langgraph.prebuilt import create_react_agent
+from pydantic import BaseModel, Field
 
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
@@ -176,49 +177,21 @@ def _build_system_prompt(
 - `analyze_fundamentals`: 財務状況確認
 - `check_sentiment`: ニュースセンチメント
 - `get_technical` / `get_news` / `get_prices`: 補助データ
-{("- 枠満杯。新規候補のスコアが保有最低スコアより 5 以上高い場合のみ `action: \"swap\"` で入れ替え" if available <= 0 else "")}
+- `submit_signals`: **シグナル提出（最終ステップ・必須）**
+{("- 枠満杯。新規候補のスコアが保有最低スコアより 5 以上高い場合のみ `action: \"swap\"` + sell_ticker で入れ替え" if available <= 0 else "")}
 
-## 出力フォーマット（最終回答） — 必読
+## 出力方法 — 必読
 
-分析が完了したら、最終回答の **冒頭** に以下の JSON ブロックを **必ず最初に** 出力してください。
-JSON の後にマークダウンの分析コメントをつけても構いません。
+分析が完了したら、**最後に必ず `submit_signals` ツールを呼び出して**シグナルを提出してください。
+- **シグナルが 0 件でも `signals=[]` で必ず呼ぶこと**（無理に買わない判断も正当）
+- テキストに JSON を書くのではなく、ツール呼び出しで提出すること
+- 提出後は簡潔な分析コメント（500字以内）で回答を締めくくる
 
-**JSON ブロックがない回答は無効です。必ず ```json ... ``` で囲んだ JSON を最初に出力すること。**
-シグナルが0件でも `"signals": []` として JSON を出力してください。
-分析コメントは JSON の後に **簡潔に（500字以内で）** 記述してください。
-
-```json
-{{
-  "signals": [
-    {{
-      "ticker": "AAPL",
-      "action": "buy",
-      "score": 45,
-      "confidence": 0.8,
-      "reason": "RSI売られすぎ + MACD ゴールデンクロス接近",
-      "entry_price": 0,
-      "target_price": 185.0,
-      "stop_loss_price": 170.0,
-      "take_profit_price": 195.0,
-      "timespan": "swing",
-      "fail_conditions": [
-        "RSI逆張り失敗 (現在RSI=75, 過去10日高点更新の可能性)",
-        "MACD乖離からの反発リスク (乖離が中期的に修正される可能性)",
-        "出来高不足でのスリップ (平均出来高比30%以下の可能性)"
-      ],
-      "invalidation_conditions": [
-        "マクロリスク中は様子見 (VIX>25の場合は買い控え)",
-        "セクター集中警告 (テック比率既に20%, 更に+5%で過集中)"
-      ],
-      "exit_plan": "逆指値 170.0 で損切り、もしくは +5% で利確"
-    }}
-  ],
-  "market_comment": "市場環境の概要と判断理由",
-  "skipped": [
-    {{"ticker": "MSFT", "reason": "スコア不足 (score=5)"}}
-  ]
-}}
-```
+各フィールドの記入例（この具体性を目安にすること）:
+- reason: "RSI売られすぎ + MACD ゴールデンクロス接近"
+- fail_conditions: ["RSI逆張り失敗 (現在RSI=75, 過去10日高点更新の可能性)", "出来高不足でのスリップ (平均出来高比30%以下)"]
+- invalidation_conditions: ["VIX>25 に上昇した場合は買い控え", "セクター集中超過 (テック比率+5%で過集中)"]
+- exit_plan: "逆指値 170.0 で損切り、もしくは +5% (195.0) で利確" ← **必ず価格・割合の数値を含める**
 
 ## 重要ルール
 - デッドキャットバウンス、出来高なしの上昇、過度なボラティリティには注意
@@ -314,7 +287,10 @@ def run_trade_graph(
         market, min_score, max_signals, dry_run,
         scenario=scenario, scenarios_cfg=scenarios_cfg,
     )
-    agent = create_react_agent(llm, ALL_TOOLS, prompt=system_prompt)
+    # シグナル提出は構造化ツール経由 (スキーマ強制でフィールド欠落を根絶)
+    captured: dict[str, Any] = {}
+    submit_tool = _make_submit_signals_tool(captured)
+    agent = create_react_agent(llm, [*ALL_TOOLS, submit_tool], prompt=system_prompt)
 
     user_msg = (
         f"現在 {now:%Y-%m-%d %H:%M} JST です。"
@@ -334,7 +310,8 @@ def run_trade_graph(
         try:
             _result_holder[0] = agent.invoke(
                 {"messages": [("user", user_msg)]},
-                config={"recursion_limit": 10},
+                # submit_signals の呼び出し+応答で 2 ステップ余分に消費する
+                config={"recursion_limit": 12},
             )
         except Exception as exc:
             _error_holder[0] = exc
@@ -343,7 +320,8 @@ def run_trade_graph(
     _agent_thread.start()
     _agent_thread.join(timeout=_AGENT_TIMEOUT)
 
-    if _agent_thread.is_alive():
+    timed_out = _agent_thread.is_alive()
+    if timed_out:
         log(f"  -> ⚠️ AI エージェントが {_AGENT_TIMEOUT}s でタイムアウト。シグナルなしで続行します。")
         result = {"messages": []}
     elif _error_holder[0] is not None:
@@ -352,6 +330,8 @@ def run_trade_graph(
     else:
         result = _result_holder[0] or {"messages": []}
     messages = result.get("messages", [])
+    # タイムアウト時はゾンビスレッドが後から captured を埋める可能性があるため読まない
+    tool_signals = None if timed_out else captured.get("signals")
 
     # Extract final AI message
     final_text = ""
@@ -365,10 +345,16 @@ def run_trade_graph(
 
     # Step 3: Parse signals from AI output (non-LLM)
     log("\nStep 3: シグナル抽出...")
-    signals = _extract_signals(final_text, max_signals)
+    if tool_signals is not None:
+        # 構造化ツール経由 (主経路): スキーマ検証済みなので正規化のみ
+        log(f"  -> submit_signals ツール経由で受理 ({len(tool_signals)} 件)")
+        signals = _normalize_signals(tool_signals, max_signals)
+    else:
+        # フォールバック: ツール未呼び出し時はテキストから JSON を抽出
+        signals = _extract_signals(final_text, max_signals)
 
     # If no signals found, ask LLM for a structured JSON summary
-    if not signals and final_text:
+    if tool_signals is None and not signals and final_text:
         log("  -> JSON 未検出。LLM に構造化出力を要求...")
         followup_prompt = (
             "以下の分析結果を元に、売買シグナルを JSON 形式で出力してください。\n"
@@ -466,19 +452,18 @@ def run_trade_graph(
 # Signal extraction & execution (non-LLM nodes)
 # ---------------------------------------------------------------------------
 
-def _extract_signals(ai_text: str, max_signals: int) -> list[dict[str, Any]]:
-    """Parse trading signals from the AI's final text output."""
-    from agents.ai import parse_ai_json
+def _normalize_signals(
+    raw_signals: list[dict[str, Any]], max_signals: int
+) -> list[dict[str, Any]]:
+    """生シグナルを検証・正規化する (ユニバース外却下・action 限定・フィールド整形)。
+
+    submit_signals ツール経由とテキスト JSON パース経由の両方で共通利用する。
+    """
     from core.screener import JP_UNIVERSE, US_UNIVERSE
 
     # スクリーナーのユニバースに含まれるティッカーのみ許可
     _valid_tickers = set(US_UNIVERSE + JP_UNIVERSE)
 
-    parsed = parse_ai_json(ai_text)
-    if not parsed:
-        return []
-
-    raw_signals = parsed.get("signals", [])
     signals: list[dict[str, Any]] = []
     for s in raw_signals[:max_signals]:
         action = s.get("action", "buy")
@@ -508,6 +493,73 @@ def _extract_signals(ai_text: str, max_signals: int) -> list[dict[str, Any]]:
             sig["sell_ticker"] = s.get("sell_ticker", "")
         signals.append(sig)
     return signals
+
+
+def _extract_signals(ai_text: str, max_signals: int) -> list[dict[str, Any]]:
+    """Parse trading signals from the AI's final text output (fallback path)."""
+    from agents.ai import parse_ai_json
+
+    parsed = parse_ai_json(ai_text)
+    if not parsed:
+        return []
+    return _normalize_signals(parsed.get("signals", []), max_signals)
+
+
+class TradeSignalArg(BaseModel):
+    """売買シグナル 1 件。"""
+
+    ticker: str = Field(description="ティッカー (例 7203.T)")
+    action: str = Field(default="buy", description='"buy" または "swap"')
+    score: float = Field(default=0, description="テクニカルスコア")
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    reason: str = Field(default="", description="売買根拠")
+    entry_price: float = Field(default=0, description="0 = 成行")
+    target_price: float = 0
+    stop_loss_price: float = 0
+    take_profit_price: float = 0
+    timespan: str = Field(default="swing", description='"short"|"swing"|"medium"')
+    fail_conditions: list[str] = Field(
+        default_factory=list, description="このトレードが失敗する具体的条件"
+    )
+    invalidation_conditions: list[str] = Field(
+        default_factory=list, description="シグナルの前提が崩れる条件"
+    )
+    exit_plan: str = Field(default="", description="価格水準を含む具体的な撤退計画")
+    sell_ticker: str = Field(default="", description="swap 時のみ: 売却対象ティッカー")
+
+
+class SubmitSignalsArgs(BaseModel):
+    """submit_signals ツールの引数スキーマ。"""
+
+    signals: list[TradeSignalArg] = Field(description="提出する売買シグナル (0件なら空配列)")
+    market_comment: str = Field(default="", description="市場環境の概要と判断理由")
+
+
+def _make_submit_signals_tool(captured: dict[str, Any]) -> Any:
+    """シグナル提出用の構造化ツールを生成する。
+
+    エージェントの最終出力をテキスト JSON ではなくツール呼び出しにすることで、
+    フィールド欠落・JSON パース失敗という故障クラスをスキーマ検証層で根絶する
+    (検証エラーは LangGraph がエージェントに差し戻して再試行させる)。
+    ※ pydantic モデルはモジュールレベルに置くこと — `from __future__ import annotations`
+      環境では関数内ローカル型を tool デコレータが解決できない。
+    """
+    from langchain_core.tools import StructuredTool
+
+    def _submit(signals: list[TradeSignalArg], market_comment: str = "") -> str:
+        captured["signals"] = [s.model_dump() for s in signals]
+        captured["market_comment"] = market_comment
+        return f"{len(signals)} 件のシグナルを受理しました。簡潔な分析コメントで回答を終えてください。"
+
+    return StructuredTool.from_function(
+        func=_submit,
+        name="submit_signals",
+        description=(
+            "売買シグナルを提出する。分析が完了したら最後に必ずこのツールを呼ぶこと。"
+            "シグナルが 0 件の場合も signals=[] で必ず呼ぶ。"
+        ),
+        args_schema=SubmitSignalsArgs,
+    )
 
 
 def _apply_counterargument_gate(

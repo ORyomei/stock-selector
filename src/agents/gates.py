@@ -24,6 +24,11 @@ REPO_ROOT = SRC_DIR.parent
 sys.path.insert(0, str(SRC_DIR))
 
 
+def _meaningful_items(items: list[Any]) -> list[str]:
+    """配列のうち「中身のある」項目だけを返す (空文字・6文字未満は数えない)。"""
+    return [s for s in items if isinstance(s, str) and len(s.strip()) >= 6]
+
+
 class CounterargumentGate:
     """Validates trading signals for required counterargument fields."""
 
@@ -84,18 +89,22 @@ class CounterargumentGate:
         mode = self._get_validation_mode(market_environment)
         thresholds = self.rules.get("scoring_thresholds", {}).get(mode, {})
 
-        # Validate fail_conditions
+        # Validate fail_conditions (項目数だけでなく中身も見る — 空文字・極端に短い項目は数えない)
         fail_cond = signal.get("fail_conditions", [])
         min_fail = int(thresholds.get("min_fail_conditions_items", 1))
         if not isinstance(fail_cond, list):
             issues.append(f"fail_conditions は配列である必要があります（受け取り: {type(fail_cond).__name__}）")
             missing_fields.append("fail_conditions")
-        elif len(fail_cond) < min_fail:
-            if len(fail_cond) == 0:
-                missing_fields.append("fail_conditions")
-                issues.append(f"fail_conditions が不足（最小 {min_fail} 項目必要）")
-            else:
-                issues.append(f"fail_conditions は最小 {min_fail} 項目必要（受け取り: {len(fail_cond)} 項目）")
+        else:
+            meaningful_fail = _meaningful_items(fail_cond)
+            if len(meaningful_fail) < min_fail:
+                if len(meaningful_fail) == 0:
+                    missing_fields.append("fail_conditions")
+                    issues.append(f"fail_conditions が不足（最小 {min_fail} 項目必要）")
+                else:
+                    issues.append(
+                        f"fail_conditions は最小 {min_fail} 項目必要（有効項目: {len(meaningful_fail)} 件）"
+                    )
 
         # Validate invalidation_conditions
         invalid_cond = signal.get("invalidation_conditions", [])
@@ -105,20 +114,27 @@ class CounterargumentGate:
                 f"invalidation_conditions は配列である必要があります（受け取り: {type(invalid_cond).__name__}）"
             )
             missing_fields.append("invalidation_conditions")
-        elif min_inv > 0 and len(invalid_cond) < min_inv:
-            if len(invalid_cond) == 0:
-                missing_fields.append("invalidation_conditions")
-                issues.append(f"invalidation_conditions が不足（最小 {min_inv} 項目必要）")
-            else:
-                issues.append(
-                    f"invalidation_conditions は最小 {min_inv} 項目必要（受け取り: {len(invalid_cond)} 項目）"
-                )
+        elif min_inv > 0:
+            meaningful_inv = _meaningful_items(invalid_cond)
+            if len(meaningful_inv) < min_inv:
+                if len(meaningful_inv) == 0:
+                    missing_fields.append("invalidation_conditions")
+                    issues.append(f"invalidation_conditions が不足（最小 {min_inv} 項目必要）")
+                else:
+                    issues.append(
+                        f"invalidation_conditions は最小 {min_inv} 項目必要（有効項目: {len(meaningful_inv)} 件）"
+                    )
 
-        # Validate exit_plan
+        # Validate exit_plan (内容検証: "N/A" 等の無実質文字列を弾く。
+        # 撤退計画には価格水準・割合など具体的な数値が含まれているべき)
         exit_plan = signal.get("exit_plan", "")
-        if not exit_plan or not isinstance(exit_plan, str):
+        if (
+            not isinstance(exit_plan, str)
+            or len(exit_plan.strip()) < 10
+            or not any(c.isdigit() for c in exit_plan)
+        ):
             missing_fields.append("exit_plan")
-            issues.append("exit_plan が不足または文字列でない")
+            issues.append("exit_plan が不足（価格・割合など数値を含む10文字以上の撤退計画が必要）")
 
         is_valid = len(issues) == 0
 
