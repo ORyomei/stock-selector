@@ -64,13 +64,13 @@ def load_or_create_broker(config: dict):
 
         broker = KabuStationBroker(config["kabu"])
         # 接続確認
-        broker.sync_from_broker()
+        broker.sync()
         print(f"✅ kabuステーション API 接続成功 (sandbox={config['kabu'].get('sandbox', False)})")
         return broker
 
-    # default: simulator
-    broker = BrokerSimulator(config["simulator"])
+    # default: simulator — repo を注入し、ミューテーション毎に自己永続化させる
     portfolio_repo = get_container().portfolio()
+    broker = BrokerSimulator(config["simulator"], repo=portfolio_repo)
     portfolio_data = portfolio_repo.load()
     if portfolio_data and (portfolio_data.get("positions") or portfolio_data.get("holdings")):
         broker.from_dict(portfolio_data)
@@ -78,17 +78,6 @@ def load_or_create_broker(config: dict):
     else:
         print("⚠️  ポートフォリオファイルなし - 初期状態で開始")
     return broker
-
-
-def save_broker_state(broker) -> None:
-    """ブローカー状態を保存。BrokerSimulator のみ portfolio.json に永続化する。"""
-    if isinstance(broker, BrokerSimulator):
-        portfolio_data = broker.to_dict()
-        get_container().portfolio().save(portfolio_data)
-        print("💾 ポートフォリオ保存完了")
-    else:
-        # 実取引ブローカーは証券会社側が真実なので保存不要
-        print("💾 実取引ブローカーのため、ローカル保存はスキップ")
 
 
 def _normalize_action(raw: str) -> TradeAction:
@@ -179,11 +168,8 @@ def cmd_execute_signal(config: dict, risk_limits: dict, signal: TradingSignal) -
     order_manager = OrderManager(risk_manager)
     executor = TradeExecutor(broker, order_manager, risk_manager)
 
-    # 実行
+    # 実行 (ブローカーが内部で自己永続化する)
     result = executor.execute_signal(signal)
-
-    # ポートフォリオ保存
-    save_broker_state(broker)
 
     # 結果保存
     saved_path = save_trade_result(result)
@@ -240,9 +226,6 @@ def cmd_check_and_close_positions(config: dict, risk_limits: dict) -> int:
     executor = TradeExecutor(broker, order_manager, risk_manager)
 
     results = executor.check_and_close_positions()
-
-    # ポートフォリオ保存
-    save_broker_state(broker)
 
     if results:
         print("## 🔄 **自動クローズ実行結果**\n")
@@ -319,7 +302,6 @@ def cmd_close_position(config: dict, ticker: str, quantity: int) -> int:
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
-    save_broker_state(broker)
     saved_path = save_trade_result(result)
 
     print(format_result_for_chat(result))

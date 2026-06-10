@@ -23,7 +23,7 @@ class _FakeJPBroker:
         self._positions = positions
         self._cash_jpy = cash_jpy
 
-    def sync_from_broker(self):
+    def sync(self):
         pass
 
     def get_positions(self):

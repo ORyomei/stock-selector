@@ -53,7 +53,7 @@ def reconcile(
     local_data = repo.load() or {"balance": {"cash_jpy": 0}, "positions": []}
 
     # --- ブローカーから取得 ---
-    broker.sync_from_broker()
+    broker.sync()
     broker_positions: list[Position] = broker.get_positions()
     broker_balance = broker.get_balance()
     broker_cash = float(broker_balance.get("cash_jpy", 0))

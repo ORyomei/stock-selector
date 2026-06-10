@@ -24,12 +24,18 @@ from domain.models import (
 )
 from interfaces.broker import BrokerInterface
 from interfaces.repositories.market_data import MarketDataRepository
+from interfaces.repositories.portfolio import PortfolioRepository
 
 
 class BrokerSimulator(BrokerInterface):
     """ローカルシミュレーター"""
 
-    def __init__(self, config: dict, market_data: MarketDataRepository | None = None):
+    def __init__(
+        self,
+        config: dict,
+        market_data: MarketDataRepository | None = None,
+        repo: PortfolioRepository | None = None,
+    ):
         """初期化
 
         Args:
@@ -40,9 +46,12 @@ class BrokerSimulator(BrokerInterface):
                     "spread_pct": float  # スプレッド% (デフォルト 0.02)
                 }
             market_data: 株価取得リポジトリ（省略時は自動取得）
+            repo: 状態永続化先 (portfolio.json)。注入時はミューテーション毎に自己永続化。
+                  None の場合は永続化しない (テスト等)。
         """
         self.config = config
         self._market_data = market_data
+        self._repo = repo
         self.spread_pct = config.get("spread_pct", 0.02)
 
         # 資金管理
@@ -136,7 +145,7 @@ class BrokerSimulator(BrokerInterface):
 
         # 即座に約定（シミュレーターでは即約定）
         self._simulate_fill(order)
-
+        self._persist()
         return order
 
     def _simulate_fill(self, order: Order) -> None:
@@ -222,6 +231,7 @@ class BrokerSimulator(BrokerInterface):
                 order.status = OrderStatus.CANCELLED
                 self._orders.pop(i)
                 self._filled_orders.append(order)
+                self._persist()
                 return True
         return False
 
@@ -246,6 +256,7 @@ class BrokerSimulator(BrokerInterface):
     def get_orders(self) -> list[Order]:
         """未約定の注文一覧 (期限切れ指値は失効処理してから返す)"""
         self._expire_stale_orders()
+        self._persist()
         return list(self._orders)
 
     def get_positions(self) -> list[Position]:
@@ -255,16 +266,29 @@ class BrokerSimulator(BrokerInterface):
             current_price = self._fetch_price(pos.ticker)
             if current_price is not None and math.isfinite(current_price):
                 pos.current_price = current_price
-                pos.__post_init__()  # pnl 再計算
+                pos.__post_init__()  # pnl 再計算 (peak_price もここでラチェット)
+        self._persist()  # 価格・高値の更新を永続化 (トレーリングストップの peak 保持)
         return list(self._positions)
 
     def get_filled_orders(self, limit: int = 100) -> list[Order]:
         """約定済み注文の履歴"""
         return list(self._filled_orders[-limit:])
 
-    def sync_from_broker(self) -> None:
-        """(実装用) 実際のAPI から状態同期"""
-        pass
+    def sync(self) -> None:
+        """バッキングストア (portfolio.json) からメモリ状態を再読込する。
+
+        別プロセス (CLI 等) が更新したファイルを取り込むため。永続化 (push) は
+        ミューテーション時に自動で行うので、sync は pull のみ。repo 未注入時は no-op。
+        """
+        if self._repo is not None:
+            data = self._repo.load()
+            if data:
+                self.from_dict(data)
+
+    def _persist(self) -> None:
+        """メモリ状態を portfolio.json に永続化する (repo 未注入時は no-op)。"""
+        if self._repo is not None:
+            self._repo.save(self.to_dict())
 
     def _add_or_update_position(
         self,

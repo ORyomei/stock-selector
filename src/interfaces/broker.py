@@ -104,10 +104,14 @@ class BrokerInterface(ABC):
         pass
 
     @abstractmethod
-    def sync_from_broker(self) -> None:
-        """ブローカー側の最新状態を同期
+    def sync(self) -> None:
+        """メモリ状態をバッキングストアと同期する (pull)。
 
-        (実装用) 実際の API から現在値・ポジション・残高を取得
+        - simulator: portfolio.json から再読込
+        - kabu: 証券会社 API から現在値・ポジション・残高を再取得
+
+        永続化 (push) はブローカーが内部で自動的に行うため、業務ロジックは
+        状態の保存を意識しない (sync だけが状態ライフサイクルの公開メソッド)。
         """
         pass
 

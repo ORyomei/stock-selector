@@ -120,7 +120,7 @@ class KabuStationBroker(BrokerInterface):
         self.timeout = config.get("timeout", 10)
 
         self._token: str | None = None
-        # 注文・ポジションのキャッシュ (sync_from_broker で更新)
+        # 注文・ポジションのキャッシュ (sync() で更新)
         self._orders_cache: list[Order] = []
         self._positions_cache: list[Position] = []
         self._balance_cache: dict[str, Any] = {}
@@ -537,8 +537,8 @@ class KabuStationBroker(BrokerInterface):
             )
         return result
 
-    def sync_from_broker(self) -> None:
-        """ブローカー側の最新状態を取得してキャッシュ更新。"""
+    def sync(self) -> None:
+        """ブローカー側 (証券会社) の最新状態を取得してローカルキャッシュを更新。"""
         self.get_balance()
         self.get_positions()
         self.get_orders()
