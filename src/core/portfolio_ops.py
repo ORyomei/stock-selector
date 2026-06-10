@@ -358,33 +358,74 @@ def cmd_status(portfolio: dict):
     }
 
 
-def cmd_performance(portfolio: dict):
-    """パフォーマンス統計"""
-    history = portfolio.get("history", [])
-    sells = [h for h in history if h["type"] == "sell"]
+def summarize_auto_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """diary/trades の約定記録から自動売買のパフォーマンスを集計する。
 
-    if not sells:
-        return {"message": "売却履歴がありません"}
+    実現損益は CLOSE/SELL の FILLED 記録の pnl から算出する
+    (BUY 記録の pnl は約定直後の評価損益＝スプレッド分であり実現益ではない)。
+    """
+    filled = [t for t in trades if t.get("status") == "FILLED"]
+    closes = [
+        t
+        for t in filled
+        if t.get("action") in ("CLOSE", "SELL") and isinstance(t.get("pnl"), int | float)
+    ]
+    buys = [t for t in filled if t.get("action") == "BUY"]
+    failed = [t for t in trades if not t.get("success")]
 
-    total_pnl = sum(s.get("pnl", 0) for s in sells)
-    wins = [s for s in sells if s.get("pnl", 0) > 0]
-    losses = [s for s in sells if s.get("pnl", 0) < 0]
-    win_rate = len(wins) / len(sells) * 100 if sells else 0
-
-    avg_win = sum(s["pnl"] for s in wins) / len(wins) if wins else 0
-    avg_loss = sum(s["pnl"] for s in losses) / len(losses) if losses else 0
-    profit_factor = (
-        abs(sum(s["pnl"] for s in wins) / sum(s["pnl"] for s in losses)) if losses else float("inf")
-    )
+    wins = [t for t in closes if t["pnl"] > 0]
+    losses = [t for t in closes if t["pnl"] < 0]
+    gross_win = sum(t["pnl"] for t in wins)
+    gross_loss = sum(t["pnl"] for t in losses)
 
     return {
-        "total_trades": len(sells),
+        "closed_trades": len(closes),
         "wins": len(wins),
         "losses": len(losses),
-        "win_rate": f"{win_rate:.1f}%",
-        "total_pnl": round(total_pnl, 2),
-        "avg_win": round(avg_win, 2),
-        "avg_loss": round(avg_loss, 2),
-        "profit_factor": round(profit_factor, 2),
-        "recent_trades": sells[-5:],
+        "win_rate": f"{len(wins) / len(closes) * 100:.1f}%" if closes else None,
+        "realized_pnl": round(sum(t["pnl"] for t in closes), 2),
+        "avg_win": round(gross_win / len(wins), 2) if wins else 0,
+        "avg_loss": round(gross_loss / len(losses), 2) if losses else 0,
+        "profit_factor": round(abs(gross_win / gross_loss), 2) if gross_loss else None,
+        "buys": len(buys),
+        "failed_orders": len(failed),
+        "recent_closes": [
+            {
+                "date": str(t.get("timestamp", ""))[:16],
+                "ticker": t.get("ticker"),
+                "pnl": t.get("pnl"),
+                "reason": str(t.get("reason", ""))[:40],
+            }
+            for t in closes[-5:]
+        ],
+    }
+
+
+def cmd_performance(portfolio: dict, days: int = 30):
+    """パフォーマンス統計 (自動売買 diary/trades + 手動 CLI 履歴)"""
+    # 自動売買: デーモンの約定記録 (diary/trades/) を集計
+    auto = summarize_auto_trades(get_container().diary().load_recent_trades(days=days))
+
+    # 手動売買: portfolio buy/sell CLI の履歴
+    history = portfolio.get("history", [])
+    sells = [h for h in history if h.get("type") == "sell"]
+    manual_pnl = sum(s.get("pnl", 0) for s in sells)
+    manual: dict[str, Any]
+    if sells:
+        m_wins = [s for s in sells if s.get("pnl", 0) > 0]
+        manual = {
+            "closed_trades": len(sells),
+            "wins": len(m_wins),
+            "win_rate": f"{len(m_wins) / len(sells) * 100:.1f}%",
+            "realized_pnl": round(manual_pnl, 2),
+            "recent_trades": sells[-5:],
+        }
+    else:
+        manual = {"message": "手動売却履歴なし"}
+
+    return {
+        "period_days": days,
+        "auto_trading": auto,
+        "manual": manual,
+        "total_realized_pnl": round(auto["realized_pnl"] + manual_pnl, 2),
     }

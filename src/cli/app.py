@@ -181,6 +181,7 @@ def portfolio(
     stop_loss: Annotated[float | None, typer.Option(help="損切りライン")] = None,
     take_profit: Annotated[float | None, typer.Option(help="利確ライン")] = None,
     apply: Annotated[bool, typer.Option("--apply", help="照合結果をローカルに反映")] = False,
+    days: Annotated[int, typer.Option(help="performance の集計期間(日)")] = 30,
 ) -> None:
     """ポートフォリオ管理."""
     from core.portfolio_ops import (
@@ -210,7 +211,7 @@ def portfolio(
     if command == "status":
         _json_out(cmd_status(pf))
     elif command == "performance":
-        _json_out(cmd_performance(pf))
+        _json_out(cmd_performance(pf, days=days))
     elif command == "buy":
         if not all([ticker, shares, price]):
             typer.echo("buy には ticker, shares, price が必要です", err=True)
