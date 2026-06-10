@@ -35,11 +35,6 @@ def load_watchlist() -> list[dict]:
     return data
 
 
-def load_portfolio() -> dict[str, Any]:
-    """ポートフォリオ読み込み"""
-    return get_container().portfolio().load() or {}
-
-
 def check_ticker(ticker: str) -> dict | None:
     """1銘柄のアラートチェック"""
     try:
@@ -217,24 +212,26 @@ def check_ticker(ticker: str) -> dict | None:
         return None
 
 
-def check_portfolio_stops(portfolio: dict) -> list[dict]:
-    """ポートフォリオの損切り/利確チェック"""
+def check_portfolio_stops() -> list[dict]:
+    """保有ポジションの損切り/利確チェック。
+
+    状態の所有者であるブローカーから建玉を取得する (portfolio.json 直読みしない)。
+    旧実装は nested 形式のファイルから "holdings" を読もうとして常に空だった。
+    """
     alerts = []
-    for h in portfolio.get("holdings", []):
-        ticker = h.get("ticker")
-        entry_price = h.get("entry_price")
-        stop_loss = h.get("stop_loss")
-        take_profit = h.get("take_profit")
+    for pos in get_container().broker().get_positions():
+        ticker = pos.ticker
+        entry_price = pos.entry_price
+        stop_loss = pos.stop_loss
+        take_profit = pos.take_profit
 
         if not ticker or not entry_price:
             continue
 
         try:
-            md = get_container().market_data()
-            current_price = md.get_current_price(ticker)
-            if current_price is None:
+            current = pos.current_price  # ブローカーが取得済みの現在値
+            if current is None or current <= 0:
                 continue
-            current = current_price
             pnl_pct = (current / entry_price - 1) * 100
 
             holding_alert = {
@@ -280,8 +277,7 @@ def run_alert(
     total_alerts = 0
 
     if check_portfolio:
-        portfolio = load_portfolio()
-        stops = check_portfolio_stops(portfolio)
+        stops = check_portfolio_stops()
         return {"portfolio_alerts": stops}
 
     if ticker:
