@@ -21,16 +21,18 @@ def load_portfolio() -> dict[str, Any] | None:
     return get_container().portfolio().load()
 
 
+# 保有状態はブローカー (状態の唯一の所有者) から取得する。portfolio.json を
+# 直読みせず、simulator/kabu のどちらでも同じ経路で読む。
 def get_held_tickers() -> set[str]:
-    return get_container().portfolio().get_held_tickers()
+    return {p.ticker for p in get_container().broker().get_positions()}
 
 
 def get_held_positions() -> list[dict[str, Any]]:
-    return get_container().portfolio().get_held_positions()
+    return [p.to_dict() for p in get_container().broker().get_positions()]
 
 
 def count_positions() -> int:
-    return get_container().portfolio().count_positions()
+    return len(get_container().broker().get_positions())
 
 
 def get_max_positions() -> int:
@@ -51,17 +53,22 @@ def confidence_to_float(label: str) -> float:
 # ── リスク監視ヘルパー (graph_trade のサイクルで使用) ─────────────────────────
 
 
+def _position_value_jpy(ticker: str, price: float, qty: int) -> float:
+    """建玉評価額を JPY 概算で返す (米国株は USD→JPY 換算)。"""
+    val = price * qty
+    return val if ticker.endswith(".T") else val * USD_JPY_APPROX
+
+
 def total_equity_jpy() -> float:
-    """総資産を JPY 概算で算出 (現金 + 建玉評価額)。日次損失・集中度の分母に使う。"""
-    pf = get_container().portfolio().load() or {}
-    bal = pf.get("balance", {})
+    """総資産を JPY 概算で算出 (現金 + 建玉評価額)。日次損失・集中度の分母に使う。
+
+    ブローカー (状態の所有者) から残高・建玉を取得する (portfolio.json 直読みしない)。
+    """
+    broker = get_container().broker()
+    bal = broker.get_balance()
     equity = float(bal.get("cash_jpy", 0) or 0) + float(bal.get("cash_usd", 0) or 0) * USD_JPY_APPROX
-    for p in pf.get("positions", []):
-        price = float(p.get("current_price") or p.get("entry_price") or 0)
-        val = price * int(p.get("quantity", 0) or 0)
-        if not str(p.get("ticker", "")).endswith(".T"):
-            val *= USD_JPY_APPROX
-        equity += val
+    for p in broker.get_positions():
+        equity += _position_value_jpy(p.ticker, p.current_price, p.quantity)
     return equity
 
 
@@ -109,20 +116,20 @@ def warn_overweight_positions(log: Any = lambda *_: None) -> None:
         from core.trade import load_risk_limits
 
         max_pct = float(load_risk_limits().get("max_position_size_pct", 30))
-        equity = total_equity_jpy()
+        # ブローカーから残高・建玉を一度だけ取得し、総資産と各比率を同じデータで算出
+        broker = get_container().broker()
+        bal = broker.get_balance()
+        positions = broker.get_positions()
+        equity = float(bal.get("cash_jpy", 0) or 0) + float(bal.get("cash_usd", 0) or 0) * USD_JPY_APPROX
+        for p in positions:
+            equity += _position_value_jpy(p.ticker, p.current_price, p.quantity)
         if equity <= 0:
             return
-        pf = get_container().portfolio().load() or {}
-        for p in pf.get("positions", []):
-            ticker = str(p.get("ticker", ""))
-            price = float(p.get("current_price") or p.get("entry_price") or 0)
-            val = price * int(p.get("quantity", 0) or 0)
-            if not ticker.endswith(".T"):
-                val *= USD_JPY_APPROX
-            pct = val / equity * 100
+        for p in positions:
+            pct = _position_value_jpy(p.ticker, p.current_price, p.quantity) / equity * 100
             if pct > max_pct:
                 log(
-                    f"  ⚠️ 集中超過: {ticker} が総資産の {pct:.0f}% "
+                    f"  ⚠️ 集中超過: {p.ticker} が総資産の {pct:.0f}% "
                     f"(上限 {max_pct:.0f}%) — 一部利確を検討"
                 )
     except Exception as e:

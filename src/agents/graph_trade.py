@@ -623,8 +623,7 @@ def _execute_signals(
             from agents.auto_trade import _cash_by_currency, _order_cost
             from agents.portfolio_helpers import USD_JPY_APPROX, total_equity_jpy
 
-            pf = get_container().portfolio().load() or {}
-            cash = _cash_by_currency(pf.get("balance", {}))
+            cash = _cash_by_currency(get_container().broker().get_balance())
             ccy, _lot, est_cost = _order_cost(sig["ticker"], est_price)
             if est_cost > cash[ccy]:
                 log(

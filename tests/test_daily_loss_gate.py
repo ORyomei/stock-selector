@@ -7,7 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from datetime import UTC, datetime  # noqa: E402
+
 from agents import portfolio_helpers as gt  # noqa: E402
+from domain.models import Position  # noqa: E402
 
 
 class _FakeDiary:
@@ -18,29 +21,44 @@ class _FakeDiary:
         return self._trades
 
 
-class _FakePortfolio:
-    def __init__(self, data):
-        self._data = data
+class _FakeBroker:
+    """総資産・集中度の読み取り元 (状態の所有者)。"""
 
-    def load(self):
-        return self._data
+    def __init__(self, positions, cash_jpy):
+        self._positions = [
+            Position(
+                ticker=p["ticker"],
+                quantity=p["quantity"],
+                entry_price=p.get("entry_price", p["current_price"]),
+                current_price=p["current_price"],
+                entry_time=datetime.now(UTC),
+            )
+            for p in positions
+        ]
+        self._cash_jpy = cash_jpy
+
+    def get_balance(self):
+        return {"cash_jpy": self._cash_jpy, "cash_usd": 0.0, "timestamp": datetime.now(UTC)}
+
+    def get_positions(self):
+        return self._positions
 
 
 class _FakeContainer:
-    def __init__(self, pf, diary):
-        self._pf = pf
+    def __init__(self, broker, diary):
+        self._broker = broker
         self._diary = diary
 
-    def portfolio(self):
-        return self._pf
+    def broker(self):
+        return self._broker
 
     def diary(self):
         return self._diary
 
 
 def _patch(monkeypatch, *, positions, cash_jpy, trades, max_daily=2.0, max_pos=30.0):
-    pf = _FakePortfolio({"balance": {"cash_jpy": cash_jpy, "cash_usd": 0}, "positions": positions})
-    monkeypatch.setattr(gt, "get_container", lambda: _FakeContainer(pf, _FakeDiary(trades)))
+    broker = _FakeBroker(positions, cash_jpy)
+    monkeypatch.setattr(gt, "get_container", lambda: _FakeContainer(broker, _FakeDiary(trades)))
 
     import core.trade as ct
 
