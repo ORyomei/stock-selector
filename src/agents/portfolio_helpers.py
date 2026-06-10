@@ -48,7 +48,7 @@ def confidence_to_float(label: str) -> float:
     }.get(label, 0.70)
 
 
-# ── リスク監視ヘルパー (legacy run_cycle / LangGraph 双方で共有) ─────────────
+# ── リスク監視ヘルパー (graph_trade のサイクルで使用) ─────────────────────────
 
 
 def total_equity_jpy() -> float:

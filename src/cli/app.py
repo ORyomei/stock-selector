@@ -279,16 +279,14 @@ def auto_trade(
     min_score: Annotated[int, typer.Option(help="最低スコア")] = 10,
     max_signals: Annotated[int, typer.Option(help="最大シグナル数")] = 2,
     dry_run: Annotated[bool, typer.Option(help="ドライラン")] = False,
-    ai: Annotated[bool, typer.Option("--ai", help="AI判断有効")] = False,
-    ai_provider: Annotated[str, typer.Option(help="AIプロバイダー")] = "copilot",
-    ai_model: Annotated[str | None, typer.Option(help="AIモデル")] = None,
+    ai_provider: Annotated[str, typer.Option(help="LLMプロバイダー")] = "copilot",
+    ai_model: Annotated[str | None, typer.Option(help="LLMモデル")] = None,
     daemon: Annotated[bool, typer.Option(help="デーモンモード（自動バックグラウンド化）")] = False,
     foreground: Annotated[bool, typer.Option("--fg", help="デーモンをフォアグラウンドで実行")] = False,
     interval: Annotated[int, typer.Option(help="実行間隔(秒)")] = 1800,
-    legacy: Annotated[bool, typer.Option(help="レガシーモード")] = False,
 ) -> None:
-    """自動売買ループ (デフォルト: LangGraph Agent。--legacy で固定パイプライン)."""
-    from agents.auto_trade import _acquire_lock, _release_lock, daemon_loop, run_cycle
+    """自動売買ループ (LangGraph Agent + 反証ゲート)."""
+    from agents.auto_trade import _acquire_lock, _release_lock, daemon_loop
 
     if daemon:
         daemon_loop(
@@ -297,36 +295,23 @@ def auto_trade(
             max_signals=max_signals,
             dry_run=dry_run,
             interval=interval,
-            use_ai=ai,
             ai_provider=ai_provider,
             ai_model=ai_model,
             foreground=foreground,
-            legacy=legacy,
         )
     else:
         _acquire_lock()
         try:
-            if legacy:
-                run_cycle(
-                    market=market,
-                    min_score=min_score,
-                    max_signals=max_signals,
-                    dry_run=dry_run,
-                    use_ai=ai,
-                    ai_provider=ai_provider,
-                    ai_model=ai_model,
-                )
-            else:
-                from agents.graph_trade import run_trade_graph
+            from agents.graph_trade import run_trade_graph
 
-                run_trade_graph(
-                    market=market,
-                    min_score=min_score,
-                    max_signals=max_signals,
-                    dry_run=dry_run,
-                    provider=ai_provider,
-                    model=ai_model,
-                )
+            run_trade_graph(
+                market=market,
+                min_score=min_score,
+                max_signals=max_signals,
+                dry_run=dry_run,
+                provider=ai_provider,
+                model=ai_model,
+            )
         finally:
             _release_lock()
 

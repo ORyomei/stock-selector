@@ -612,6 +612,40 @@ def _execute_signals(
                     continue
                 executed.append({"ticker": sell_ticker, "status": "SOLD", "score": 0})
 
+        # 資金・評価額の事前チェック (買えないシグナルで発注枠と FAILED ログを浪費しない)
+        # swap (売り→買い) は売却代金が入るためスキップし、RiskManager に委ねる
+        est_price = float(sig.get("target_price") or 0)
+        if not sig.get("sell_ticker") and est_price > 0:
+            from agents.auto_trade import _cash_by_currency, _order_cost
+            from agents.portfolio_helpers import USD_JPY_APPROX, total_equity_jpy
+
+            pf = get_container().portfolio().load() or {}
+            cash = _cash_by_currency(pf.get("balance", {}))
+            ccy, _lot, est_cost = _order_cost(sig["ticker"], est_price)
+            if est_cost > cash[ccy]:
+                log(
+                    f"  💰 {sig['ticker']}: {ccy}資金不足 "
+                    f"(1単元≈{est_cost:,.0f} {ccy}, 残高{cash[ccy]:,.0f} {ccy}) -> スキップ"
+                )
+                executed.append({"ticker": sig["ticker"], "status": "SKIPPED_FUNDS", "score": sig.get("score", 0)})
+                continue
+            try:
+                from core.trade import load_risk_limits
+
+                max_pos_pct = float(load_risk_limits().get("max_position_size_pct", 30))
+            except Exception:
+                max_pos_pct = 30.0
+            equity = total_equity_jpy()
+            cap = equity * max_pos_pct / 100 if equity > 0 else 0.0
+            cap_ccy = cap if ccy == "JPY" else cap / USD_JPY_APPROX
+            if cap > 0 and est_cost > cap_ccy:
+                log(
+                    f"  📏 {sig['ticker']}: 1単元(≈{est_cost:,.0f} {ccy})が評価額上限"
+                    f"({max_pos_pct:.0f}%≈{cap_ccy:,.0f} {ccy})超 -> スキップ"
+                )
+                executed.append({"ticker": sig["ticker"], "status": "SKIPPED_CAP", "score": sig.get("score", 0)})
+                continue
+
         # Buy — 成行注文（シミュレーターが指値PENDINGに非対応のため）
         buy_sig = {k: v for k, v in sig.items() if k != "sell_ticker"}
         buy_sig["entry_price"] = 0  # MARKET order
