@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from interfaces.repositories.market_data import MarketDataRepository
@@ -226,12 +226,32 @@ class BrokerSimulator(BrokerInterface):
                 return True
         return False
 
+    def _expire_stale_orders(self) -> None:
+        """前日以前 (JST) の未約定指値を失効させる (kabu の ExpireDay=当日 相当)。
+
+        失効処理が無いと未約定の PENDING 指値が永久に蓄積し、再起動を跨いで
+        復元され続ける。JST の暦日が変わった時点で CANCELLED に落とす。
+        """
+        jst = timezone(timedelta(hours=9))
+        today_jst = datetime.now(jst).date()
+        still_pending: list[Order] = []
+        for order in self._orders:
+            order_day = order.order_time.astimezone(jst).date()
+            if order_day < today_jst:
+                order.status = OrderStatus.CANCELLED
+                self._filled_orders.append(order)
+            else:
+                still_pending.append(order)
+        self._orders = still_pending
+
     def get_orders(self) -> list[Order]:
-        """未約定の注文一覧"""
+        """未約定の注文一覧 (期限切れ指値は失効処理してから返す)"""
+        self._expire_stale_orders()
         return list(self._orders)
 
     def get_positions(self) -> list[Position]:
         """保有ポジション一覧（現在値で更新）"""
+        self._expire_stale_orders()
         for pos in self._positions:
             current_price = self._fetch_price(pos.ticker)
             if current_price is not None and math.isfinite(current_price):
