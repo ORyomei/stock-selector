@@ -32,14 +32,14 @@ from typing import Any
 
 import requests
 
-from ..broker_interface import (
-    BrokerInterface,
+from domain.models import (
     Order,
     OrderSide,
     OrderStatus,
     OrderType,
     Position,
 )
+from interfaces.broker import BrokerInterface
 
 logger = logging.getLogger(__name__)
 

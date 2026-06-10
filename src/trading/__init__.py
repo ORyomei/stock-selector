@@ -1,20 +1,15 @@
-"""取引エンジンパッケージ
+"""取引ドメインサービス層
 
-Order、Position、ブローカーインターフェース、シミュレーター、
-注文管理、リスク管理、取引実行を提供する。
+注文管理・リスク管理・取引実行を提供する。
+値オブジェクト (Order/Position) は domain/、ブローカー port は interfaces/broker、
+具象ブローカーは infra/brokers/ に分離されている。
 """
 
-from .broker_interface import BrokerInterface, Order, Position
 from .order_manager import OrderManager, TimeSpan, TradeAction, TradingSignal
 from .risk_manager import RiskManager
-from .simulator import BrokerSimulator
 from .trade_executor import TradeExecutor
 
 __all__ = [
-    "Order",
-    "Position",
-    "BrokerInterface",
-    "BrokerSimulator",
     "TradingSignal",
     "OrderManager",
     "TradeAction",

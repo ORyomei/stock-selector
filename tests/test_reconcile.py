@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from core import reconcile as rec  # noqa: E402
-from trading.broker_interface import Position  # noqa: E402
+from domain.models import Position  # noqa: E402
 
 
 class _FakeJPBroker:

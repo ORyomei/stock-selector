@@ -8,7 +8,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from .broker_interface import BrokerInterface
+from interfaces.broker import BrokerInterface
+
 from .order_manager import OrderManager, TradeAction, TradingSignal
 from .risk_manager import RiskManager
 

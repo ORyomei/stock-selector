@@ -15,16 +15,15 @@ import uuid
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
-from interfaces.repositories.market_data import MarketDataRepository
-
-from .broker_interface import (
-    BrokerInterface,
+from domain.models import (
     Order,
     OrderSide,
     OrderStatus,
     OrderType,
     Position,
 )
+from interfaces.broker import BrokerInterface
+from interfaces.repositories.market_data import MarketDataRepository
 
 
 class BrokerSimulator(BrokerInterface):

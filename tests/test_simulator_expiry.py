@@ -12,8 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from trading.broker_interface import Order, OrderSide, OrderStatus, OrderType  # noqa: E402
-from trading.simulator import BrokerSimulator  # noqa: E402
+from domain.models import Order, OrderSide, OrderStatus, OrderType  # noqa: E402
+from infra.brokers.simulator import BrokerSimulator  # noqa: E402
 
 
 def _pending(order_time: datetime, order_id: str = "o1") -> Order:

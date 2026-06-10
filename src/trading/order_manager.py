@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from .broker_interface import Order, OrderSide, OrderType
+from domain.models import Order, OrderSide, OrderType
 
 
 class TradeAction(StrEnum):

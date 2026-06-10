@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC
 
-from .broker_interface import Position
+from domain.models import Position
 
 
 class RiskManager:

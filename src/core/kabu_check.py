@@ -9,9 +9,9 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from infra.brokers import KabuStationBroker
+from infra.brokers.kabu_station import KabuStationError
 from infra.container import get_container
-from trading.brokers import KabuStationBroker
-from trading.brokers.kabu_station import KabuStationError
 
 
 def check_connection(

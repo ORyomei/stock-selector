@@ -26,15 +26,15 @@ from typing import Any
 # 親ディレクトリから import
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from domain.models import OrderSide, OrderType
+from infra.brokers import BrokerSimulator
 from trading import (
-    BrokerSimulator,
     OrderManager,
     RiskManager,
     TradeAction,
     TradeExecutor,
     TradingSignal,
 )
-from trading.broker_interface import OrderSide, OrderType
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -60,7 +60,7 @@ def load_or_create_broker(config: dict):
     broker_name = (config.get("broker") or "simulator").lower()
 
     if broker_name == "kabu":
-        from trading.brokers import KabuStationBroker
+        from infra.brokers import KabuStationBroker
 
         broker = KabuStationBroker(config["kabu"])
         # 接続確認

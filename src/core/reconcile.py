@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from domain.models import Position
 from infra.container import get_container
-from trading.broker_interface import BrokerInterface, Position
+from interfaces.broker import BrokerInterface
 
 
 @dataclass

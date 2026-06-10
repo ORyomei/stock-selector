@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from trading.broker_interface import Position  # noqa: E402
+from domain.models import Position  # noqa: E402
 from trading.risk_manager import RiskManager  # noqa: E402
 
 PCT = 30
