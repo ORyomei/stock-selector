@@ -58,6 +58,7 @@ try:
             over = h["concentration_pct"] > ov["max_position_pct"]
             rows.append({
                 "銘柄": h["ticker"],
+                "銘柄名": h.get("name", ""),
                 "数量": h["qty"],
                 "取得": h["entry"],
                 "現在": h["current"],

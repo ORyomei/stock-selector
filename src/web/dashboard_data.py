@@ -25,6 +25,34 @@ DAEMON_LOG = SRC_DIR.parent / "logs" / "auto_trade_daemon.log"
 SIGNALS_DIR = DIARY_DIR / "signals"
 
 
+# 既知ETFの表示名 (yfinance は運用会社名を返すため正しいファンド名で上書き)
+_ETF_NAMES = {
+    "2559.T": "MAXIS 全世界株式 (オルカン/ACWI)",
+    "1655.T": "iシェアーズ S&P500",
+    "1306.T": "NEXT FUNDS TOPIX",
+    "1545.T": "NEXT FUNDS NASDAQ100",
+    "1489.T": "NEXT FUNDS 日経高配当株50",
+}
+# 銘柄名は変わらないのでプロセス内でキャッシュ (yfinance 呼び出しを1回だけに)
+_NAME_CACHE: dict[str, str] = {}
+
+
+def _resolve_name(ticker: str) -> str:
+    """表示用の銘柄名を返す。既知ETFは固定名、個別株は yfinance (キャッシュ)。"""
+    if ticker in _ETF_NAMES:
+        return _ETF_NAMES[ticker]
+    if ticker in _NAME_CACHE:
+        return _NAME_CACHE[ticker]
+    try:
+        from core.portfolio_ops import get_ticker_name
+
+        name = get_ticker_name(ticker) or ticker
+    except Exception:
+        name = ticker
+    _NAME_CACHE[ticker] = name
+    return name
+
+
 def _value_jpy(ticker: str, price: float, qty: int) -> float:
     val = price * qty
     return val if ticker.endswith(".T") else val * USD_JPY
@@ -104,6 +132,7 @@ def portfolio_overview() -> dict[str, Any]:
         take = p.get("take_profit")
         holdings.append({
             "ticker": ticker,
+            "name": _resolve_name(ticker),
             "qty": qty,
             "entry": round(entry, 2),
             "current": round(current, 2),

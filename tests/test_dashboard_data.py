@@ -15,6 +15,20 @@ def test_value_jpy_currency_conversion():
     assert dd._value_jpy("AAPL", 100.0, 10) == 100.0 * 10 * dd.USD_JPY  # 米国株は換算
 
 
+def test_etf_name_override():
+    """既知ETFは yfinance を呼ばず固定のファンド名を返す。"""
+    assert dd._resolve_name("2559.T") == "MAXIS 全世界株式 (オルカン/ACWI)"
+    assert dd._resolve_name("1306.T") == "NEXT FUNDS TOPIX"
+
+
+def test_name_fallback_to_ticker(monkeypatch):
+    """名前解決に失敗したらティッカーにフォールバック。"""
+    dd._NAME_CACHE.clear()
+    import core.portfolio_ops as po
+    monkeypatch.setattr(po, "get_ticker_name", lambda t: (_ for _ in ()).throw(RuntimeError("net")))
+    assert dd._resolve_name("ZZZZ.T") == "ZZZZ.T"
+
+
 def test_close_reason_bucket():
     assert dd._close_reason_bucket("Auto-close: stop_loss") == "stop_loss"
     assert dd._close_reason_bucket("利確到達") == "take_profit"
