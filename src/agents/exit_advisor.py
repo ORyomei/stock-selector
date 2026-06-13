@@ -44,6 +44,23 @@ def _safe(fn, *args, **kwargs):
         return None
 
 
+def _earnings_days_from(dates: list, today) -> int | None:
+    """決算日リストから「今日以降で最も近い決算までの日数」を返す (純関数)。"""
+    future = [d for d in dates if hasattr(d, "__sub__") and d >= today]
+    return (min(future) - today).days if future else None
+
+
+def _days_to_earnings(ticker: str) -> int | None:
+    """次回決算までの日数 (yfinance calendar)。取得失敗・予定なしは None。"""
+    from datetime import date
+
+    import yfinance as yf
+
+    cal = yf.Ticker(ticker).calendar
+    dates = cal.get("Earnings Date") or [] if isinstance(cal, dict) else []
+    return _earnings_days_from(dates, date.today())
+
+
 def _position_context(pos: Any) -> dict[str, Any]:
     """1ポジションの判断材料を集める (建玉facts + テクニカル + センチメント)。"""
     from datetime import UTC, datetime
@@ -97,6 +114,11 @@ def _position_context(pos: Any) -> dict[str, Any]:
             "score": sent.get("score"),
         }
 
+    # 次回決算までの日数 (決算前の手仕舞い判断用)
+    days_to_earn = _safe(_days_to_earnings, ticker)
+    if days_to_earn is not None:
+        ctx["days_to_earnings"] = days_to_earn
+
     return ctx
 
 
@@ -111,7 +133,8 @@ def _build_prompt(contexts: list[dict[str, Any]], scenario: str) -> str:
         f"保有ポジション:\n```json\n{json.dumps(contexts, ensure_ascii=False, indent=2)}\n```\n\n"
         "各ポジションについて、機械ルールより**早く手仕舞うべき理由があるか**だけを判断してください。\n"
         "判断基準の例: 投資テーゼの崩壊、テクニカルの明確な悪化 (売り転換)、強い悪材料、\n"
-        "高値から大きく押し戻されている、強い抵抗線でモメンタム喪失 など。\n"
+        "高値から大きく押し戻されている、強い抵抗線でモメンタム喪失、"
+        "**決算が間近 (days_to_earnings が小さい) で決算ギャンブルを避けたい** など。\n"
         "**デフォルトは hold** とし、明確な根拠がある時だけ exit / trim を選んでください。\n"
         "（あなたは機械ストップを止めることはできません。より早い手仕舞いの助言のみ可能です。）\n\n"
         "次の JSON のみを出力してください:\n"

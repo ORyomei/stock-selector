@@ -7,7 +7,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agents.exit_advisor import _parse_exit_response  # noqa: E402
+from datetime import date, timedelta  # noqa: E402
+
+from agents.exit_advisor import _earnings_days_from, _parse_exit_response  # noqa: E402
+
+
+def test_earnings_days_picks_nearest_future():
+    today = date(2026, 6, 14)
+    dates = [date(2026, 4, 28), date(2026, 6, 20), date(2026, 8, 6)]  # 過去1+未来2
+    assert _earnings_days_from(dates, today) == 6  # 最も近い未来 6/20
+
+
+def test_earnings_days_none_when_all_past():
+    today = date(2026, 6, 14)
+    assert _earnings_days_from([date(2026, 1, 1)], today) is None
+    assert _earnings_days_from([], today) is None
+
+
+def test_earnings_days_today_is_zero():
+    today = date(2026, 6, 14)
+    assert _earnings_days_from([today, today + timedelta(days=10)], today) == 0
 
 HELD = {"8306.T", "7267.T", "1306.T"}
 
