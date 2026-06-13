@@ -57,6 +57,41 @@ def test_trace_to_dot():
     assert dot.count("->") == 4  # 5ノード(開始+3ツール+最終判断)= 4エッジ
 
 
+def test_flag_on_at():
+    """クローズ時刻時点のフラグ状態を正しく引く (記録前は None)。"""
+    log = [
+        {"ts": "2026-06-01T00:00:00+00:00", "flags": {"ai_exit_advisor": True}},
+        {"ts": "2026-06-10T00:00:00+00:00", "flags": {"ai_exit_advisor": False}},
+    ]
+    assert dd._flag_on_at(log, "ai_exit_advisor", "2026-05-30T00:00:00+00:00") is None  # 記録前
+    assert dd._flag_on_at(log, "ai_exit_advisor", "2026-06-05T00:00:00+00:00") is True   # ON期間
+    assert dd._flag_on_at(log, "ai_exit_advisor", "2026-06-15T00:00:00+00:00") is False  # OFF期間
+
+
+def test_performance_by_period(monkeypatch):
+    flag_log = [
+        {"ts": "2026-06-01T00:00:00+00:00", "flags": {"ai_exit_advisor": True}},
+        {"ts": "2026-06-10T00:00:00+00:00", "flags": {"ai_exit_advisor": False}},
+    ]
+    trades = [
+        {"action": "CLOSE", "ticker": "A.T", "pnl": 500, "timestamp": "2026-06-05T00:00:00+00:00"},  # ON
+        {"action": "CLOSE", "ticker": "B.T", "pnl": -200, "timestamp": "2026-06-12T00:00:00+00:00"},  # OFF
+        {"action": "CLOSE", "ticker": "C.T", "pnl": 99, "timestamp": "2026-05-01T00:00:00+00:00"},  # unknown
+    ]
+    monkeypatch.setattr(dd, "_load_flag_log", lambda: flag_log)
+
+    class _D:
+        def load_recent_trades(self, days=30):
+            return trades
+
+    monkeypatch.setattr(dd, "get_container", lambda: type("C", (), {"diary": lambda self=None: _D()})())
+    out = dd.performance_by_period()
+    f = out["by_flag"]["ai_exit_advisor"]
+    assert f["ON"]["count"] == 1 and f["ON"]["total_pnl"] == 500
+    assert f["OFF"]["count"] == 1 and f["OFF"]["total_pnl"] == -200
+    assert f["unknown"] == 1
+
+
 def test_source_category():
     assert dd._source_category("ai_exit") == "AI手仕舞い"
     assert dd._source_category("ai_trim") == "AI手仕舞い"

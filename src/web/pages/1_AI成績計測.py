@@ -80,6 +80,46 @@ try:
             else:
                 st.caption("データなし（機械ストップ未発火 or タグ付け前）")
 
+    # ── 期間A/B (AIフラグ ON/OFF) ──
+    st.subheader("📅 期間A/B（AIフラグ ON/OFF 別）")
+    st.caption(
+        "各クローズをそのクローズ時点のAIフラグ状態に帰属させた実績。"
+        "フラグを一定期間OFFにすると ON/OFF の比較が貯まります（時期バイアスは残る）。"
+    )
+    try:
+        period = dd.performance_by_period()
+        flag_labels = {
+            "ai_exit_advisor": "AI手仕舞い",
+            "ai_reflection": "振り返り学習",
+            "ai_portfolio_review": "ポートフォリオ推論",
+        }
+        prows = []
+        for flag, label in flag_labels.items():
+            d = period["by_flag"].get(flag, {})
+            on, off = d.get("ON", {}), d.get("OFF", {})
+            prows.append({
+                "AI機能": label,
+                "ON: 件数": on.get("count", 0),
+                "ON: 勝率%": on.get("win_rate", "-"),
+                "ON: 平均損益¥": f"{on.get('avg_pnl', 0):+,.0f}" if on.get("count") else "-",
+                "OFF: 件数": off.get("count", 0),
+                "OFF: 勝率%": off.get("win_rate", "-"),
+                "OFF: 平均損益¥": f"{off.get('avg_pnl', 0):+,.0f}" if off.get("count") else "-",
+            })
+        st.dataframe(prows, width="stretch", hide_index=True)
+        if all(r["OFF: 件数"] == 0 for r in prows):
+            st.caption("※ 現在すべてのAI機能がONのため OFF 期間の実績はまだありません。"
+                       "config の各フラグを一定期間 false にすると比較データが貯まります。")
+        flog = period.get("flag_log", [])
+        if flog:
+            with st.expander("AIフラグ変更履歴"):
+                st.dataframe(
+                    [{"日時": e.get("ts", "")[:19], **e.get("flags", {})} for e in flog],
+                    width="stretch", hide_index=True,
+                )
+    except Exception as e:
+        st.error(f"期間A/B取得エラー: {e}")
+
     # ── ソース詳細 ──
     with st.expander("ソース詳細（細分）"):
         det = [

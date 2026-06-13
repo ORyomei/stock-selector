@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -291,6 +291,33 @@ def _run_ai_exit_advisor(
         log(f"  ⚠️ AI手仕舞いステップでエラー (機械ストップは適用済み): {e}")
 
 
+_AI_FLAG_KEYS = ("ai_exit_advisor", "ai_reflection", "ai_portfolio_review")
+
+
+def _record_ai_flags() -> None:
+    """AIフラグ構成が前回と変われば diary/ai_flags.jsonl に追記 (期間A/B計測用)。"""
+    try:
+        from core.trade import load_config
+
+        cfg = load_config()
+        flags = {k: bool(cfg.get(k, False)) for k in _AI_FLAG_KEYS}
+        path = DIARY_DIR / "ai_flags.jsonl"
+        last = None
+        if path.exists():
+            lines = path.read_text(encoding="utf-8").strip().splitlines()
+            if lines:
+                last = json.loads(lines[-1]).get("flags")
+        if last != flags:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(
+                    {"ts": datetime.now(UTC).isoformat(), "flags": flags},
+                    ensure_ascii=False,
+                ) + "\n")
+    except Exception as e:
+        print(f"⚠️ ai_flags 記録スキップ: {e}", file=sys.stderr)
+
+
 def _reflect_if_enabled(provider: str, model: str | None, log: Any) -> str:
     """trading_config の ai_reflection が有効なら過去実績の教訓を返す (既定 False)。"""
     try:
@@ -341,6 +368,7 @@ def run_trade_graph(
     #   simulator: portfolio.json 再読込 (別プロセスの CLI 変更を取り込む)
     #   kabu: 証券会社 API から再取得
     get_container().broker().sync()
+    _record_ai_flags()  # 期間A/B計測用にこのサイクルの AI フラグ構成を記録
     # kabu モード時はローカル portfolio.json をブローカー実態に reconcile
     from agents.auto_trade import _reconcile_if_needed
 

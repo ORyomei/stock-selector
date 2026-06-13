@@ -269,6 +269,62 @@ def performance_by_source(days: int = 120) -> dict[str, Any]:
     }
 
 
+_AI_FLAG_KEYS = ("ai_exit_advisor", "ai_reflection", "ai_portfolio_review")
+
+
+def _load_flag_log() -> list[dict[str, Any]]:
+    """diary/ai_flags.jsonl を時系列順 (追記順) で返す。"""
+    path = DIARY_DIR / "ai_flags.jsonl"
+    out: list[dict[str, Any]] = []
+    try:
+        for ln in path.read_text(encoding="utf-8").strip().splitlines():
+            try:
+                out.append(json.loads(ln))
+            except json.JSONDecodeError:
+                continue
+    except OSError:
+        return []
+    return out
+
+
+def _flag_on_at(flag_log: list[dict[str, Any]], flag: str, ts: str) -> bool | None:
+    """時刻 ts 時点でのフラグ状態 (記録前なら None)。ISO文字列の辞書順比較。"""
+    applicable = [e for e in flag_log if str(e.get("ts", "")) <= ts]
+    if not applicable:
+        return None
+    return bool(applicable[-1].get("flags", {}).get(flag, False))
+
+
+def performance_by_period(days: int = 180) -> dict[str, Any]:
+    """AIフラグ ON/OFF 期間別に実現損益を比較する (期間A/B)。
+
+    各クローズをそのクローズ時点のフラグ状態に帰属させ、フラグごとに ON/OFF の
+    実績を集計する。フラグ記録前のクローズは unknown。
+    """
+    flag_log = _load_flag_log()
+    trades = get_container().diary().load_recent_trades(days=days)
+    closed = [
+        t for t in trades
+        if str(t.get("action", "")) in {"CLOSE", "SELL", "close", "sell"}
+        and isinstance(t.get("pnl"), int | float)
+    ]
+    by_flag: dict[str, Any] = {}
+    for flag in _AI_FLAG_KEYS:
+        on_p: list[float] = []
+        off_p: list[float] = []
+        unknown = 0
+        for t in closed:
+            state = _flag_on_at(flag_log, flag, str(t.get("timestamp", "")))
+            if state is None:
+                unknown += 1
+            elif state:
+                on_p.append(float(t["pnl"]))
+            else:
+                off_p.append(float(t["pnl"]))
+        by_flag[flag] = {"ON": _agg_pnl(on_p), "OFF": _agg_pnl(off_p), "unknown": unknown}
+    return {"flag_log": flag_log, "by_flag": by_flag, "total_closed": len(closed)}
+
+
 # ── signals / activity / AI insights ─────────────────────────────
 
 
