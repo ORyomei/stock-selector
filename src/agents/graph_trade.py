@@ -437,6 +437,12 @@ def run_trade_graph(
             final_text = msg.content
             break
 
+    # 思考トレース (ツール呼び出し列・推論) を永続化 — 可視化用。失敗してもサイクルは止めない
+    try:
+        _save_trace(file_ts, market, _serialize_trace(messages))
+    except Exception as e:
+        log(f"  ⚠️ トレース保存スキップ: {e}")
+
     log("\n--- AI分析結果 ---")
     log(final_text[:2000] if len(final_text) > 2000 else final_text)
 
@@ -754,6 +760,53 @@ def _execute_signals(
             {"ticker": sig["ticker"], "status": "FILLED" if ok else "FAILED", "score": sig.get("score", 0)}
         )
     return executed
+
+
+def _serialize_trace(messages: list[Any]) -> list[dict[str, Any]]:
+    """LangGraph の messages を可視化用の構造化ステップ列に変換する (純関数)。
+
+    各ステップ: user / reasoning / tool_call(tool,args) / tool_result(tool,summary) / final
+    """
+    steps: list[dict[str, Any]] = []
+    for m in messages:
+        content = getattr(m, "content", "") or ""
+        mtype = getattr(m, "type", "")  # LangChain BaseMessage.type: human/ai/tool
+        if mtype == "tool" or getattr(m, "tool_call_id", None) is not None:  # ToolMessage
+            steps.append({
+                "type": "tool_result",
+                "tool": getattr(m, "name", "?"),
+                "summary": str(content)[:400],
+            })
+            continue
+        tool_calls = getattr(m, "tool_calls", None)
+        if tool_calls:  # AIMessage with tool calls
+            if str(content).strip():
+                steps.append({"type": "reasoning", "text": str(content)[:600]})
+            for tc in tool_calls:
+                steps.append({
+                    "type": "tool_call",
+                    "tool": tc.get("name", "?") if isinstance(tc, dict) else "?",
+                    "args": tc.get("args", {}) if isinstance(tc, dict) else {},
+                })
+            continue
+        if mtype == "human" or type(m).__name__ == "HumanMessage":
+            steps.append({"type": "user", "text": str(content)[:300]})
+        elif str(content).strip():  # final AIMessage
+            steps.append({"type": "final", "text": str(content)[:2000]})
+    return steps
+
+
+def _save_trace(file_ts: str, market: str, steps: list[dict[str, Any]]) -> None:
+    """思考トレースを diary/traces/<cycle>.json に保存する。"""
+    if not steps:
+        return
+    traces_dir = DIARY_DIR / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    (traces_dir / f"{file_ts}_{market}.json").write_text(
+        json.dumps({"file_ts": file_ts, "market": market, "steps": steps},
+                   ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _save_log(
