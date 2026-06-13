@@ -36,3 +36,4 @@ diary/
 *.bak_*
 TODO.md
 .auto_trade.lock
+.dashboard.lock

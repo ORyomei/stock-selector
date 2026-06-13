@@ -354,25 +354,77 @@ def auto_analyze(
 
 
 # ── Dashboard ────────────────────────────────────────────
+_DASHBOARD_LOCK = Path(__file__).resolve().parent.parent.parent / ".dashboard.lock"
+_DASHBOARD_LOG = Path(__file__).resolve().parent.parent.parent / "logs" / "dashboard.log"
+
+
+def _dashboard_pid() -> int | None:
+    """常駐ダッシュボードの稼働 PID (生存していれば) を返す。"""
+    if not _DASHBOARD_LOCK.exists():
+        return None
+    try:
+        pid = int(_DASHBOARD_LOCK.read_text().strip())
+        os.kill(pid, 0)
+        return pid
+    except (ValueError, OSError):
+        _DASHBOARD_LOCK.unlink(missing_ok=True)
+        return None
+
+
 @app.command()
 def dashboard(
     port: Annotated[int, typer.Option(help="ポート")] = 8501,
     host: Annotated[str, typer.Option(help="バインドアドレス (既定: localhost のみ)")] = "127.0.0.1",
+    daemon: Annotated[bool, typer.Option(help="バックグラウンド常駐起動")] = False,
+    stop: Annotated[bool, typer.Option("--stop", help="常駐ダッシュボードを停止")] = False,
 ) -> None:
-    """取引状況ダッシュボードを起動 (Streamlit, 読み取り専用)."""
+    """取引状況ダッシュボードを起動 (Streamlit, 読み取り専用).
+
+    既定はフォアグラウンド (Ctrl+C で停止)。--daemon で常駐、--stop で停止。
+    """
+    import signal as sig
     import subprocess
 
+    if stop:
+        pid = _dashboard_pid()
+        if pid is None:
+            typer.echo("❌ 常駐ダッシュボードは稼働していません")
+            raise typer.Exit(1)
+        os.killpg(os.getpgid(pid), sig.SIGTERM)  # streamlit の子も含めグループごと停止
+        _DASHBOARD_LOCK.unlink(missing_ok=True)
+        typer.echo(f"✅ ダッシュボード停止 (PID={pid})")
+        return
+
+    existing = _dashboard_pid()
+    if existing is not None:
+        typer.echo(f"⚠️  既に常駐ダッシュボードが稼働中です (PID={existing})。停止: stock-selector dashboard --stop")
+        raise typer.Exit(1)
+
     app_path = Path(__file__).resolve().parent.parent / "web" / "app.py"
-    typer.echo(f"📈 ダッシュボード起動: http://{host}:{port}  (Ctrl+C で停止)")
-    subprocess.run(
-        [
-            sys.executable, "-m", "streamlit", "run", str(app_path),
-            "--server.port", str(port),
-            "--server.address", host,
-            "--server.headless", "true",
-            "--browser.gatherUsageStats", "false",
-        ],
-    )
+    cmd = [
+        sys.executable, "-m", "streamlit", "run", str(app_path),
+        "--server.port", str(port),
+        "--server.address", host,
+        "--server.headless", "true",
+        "--browser.gatherUsageStats", "false",
+    ]
+
+    if not daemon:
+        typer.echo(f"📈 ダッシュボード起動: http://{host}:{port}  (Ctrl+C で停止)")
+        subprocess.run(cmd)
+        return
+
+    # 常駐: 新セッションで detach し、ログにリダイレクト。PID を lock に記録。
+    # 子は Popen 時に fd を複製するので、親側は with を抜けて閉じてよい。
+    _DASHBOARD_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(_DASHBOARD_LOG, "a") as logf:
+        proc = subprocess.Popen(
+            cmd, stdout=logf, stderr=logf, stdin=subprocess.DEVNULL, start_new_session=True
+        )
+    _DASHBOARD_LOCK.write_text(f"{proc.pid}\n")
+    typer.echo(f"✅ ダッシュボード常駐起動 (PID={proc.pid})  http://{host}:{port}")
+    typer.echo(f"   ログ: {_DASHBOARD_LOG}")
+    typer.echo("   停止: stock-selector dashboard --stop")
 
 
 # ── Kabu Check ───────────────────────────────────────────
