@@ -353,6 +353,28 @@ def auto_analyze(
         )
 
 
+# ── Dashboard ────────────────────────────────────────────
+@app.command()
+def dashboard(
+    port: Annotated[int, typer.Option(help="ポート")] = 8501,
+    host: Annotated[str, typer.Option(help="バインドアドレス (既定: localhost のみ)")] = "127.0.0.1",
+) -> None:
+    """取引状況ダッシュボードを起動 (Streamlit, 読み取り専用)."""
+    import subprocess
+
+    app_path = Path(__file__).resolve().parent.parent / "web" / "app.py"
+    typer.echo(f"📈 ダッシュボード起動: http://{host}:{port}  (Ctrl+C で停止)")
+    subprocess.run(
+        [
+            sys.executable, "-m", "streamlit", "run", str(app_path),
+            "--server.port", str(port),
+            "--server.address", host,
+            "--server.headless", "true",
+            "--browser.gatherUsageStats", "false",
+        ],
+    )
+
+
 # ── Kabu Check ───────────────────────────────────────────
 @app.command(name="kabu-check")
 def kabu_check(

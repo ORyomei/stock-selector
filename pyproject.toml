@@ -17,6 +17,7 @@ dependencies = [
     "dependency-injector>=4.49.0",
     "langgraph>=1.1.6",
     "typer>=0.23.1",
+    "streamlit>=1.58.0",
 ]
 
 [build-system]
@@ -33,6 +34,7 @@ packages = [
     "src/trading",
     "src/infra",
     "src/interfaces",
+    "src/web",
 ]
 
 [project.scripts]
