@@ -113,7 +113,10 @@ def run_trade_cmd(
                 idx = args_list.index("--close")
                 ticker = args_list[idx + 1]
                 qty = int(args_list[idx + 2])
-                rc = cmd_close_position(config, ticker, qty)
+                source = "manual"
+                if "--source" in args_list:
+                    source = args_list[args_list.index("--source") + 1]
+                rc = cmd_close_position(config, ticker, qty, source=source)
 
             else:
                 return f"ERROR: unknown args {args_list}", 1

@@ -150,6 +150,7 @@ def cmd_execute_signal(config: dict, risk_limits: dict, signal: TradingSignal) -
 
     # 実行 (ブローカーが内部で自己永続化する)
     result = executor.execute_signal(signal)
+    result["source"] = "ai_entry"  # ReAct エージェント由来のエントリー
 
     # 結果保存
     saved_path = save_trade_result(result)
@@ -215,6 +216,20 @@ def cmd_check_and_close_positions(config: dict, risk_limits: dict) -> int:
                 f"{status_emoji} {result['ticker']}: {result['reason']} "
                 f"(数量: {result['quantity']}, PnL: {result['pnl']})"
             )
+            # 機械クローズも diary/trades に source タグ付きで記録 (成績計測用)
+            if result.get("success") and result.get("ticker") not in (None, "N/A"):
+                save_trade_result({
+                    "success": True,
+                    "ticker": result["ticker"],
+                    "action": "CLOSE",
+                    "quantity": result.get("quantity"),
+                    "fill_price": result.get("fill_price"),
+                    "pnl": result.get("pnl"),
+                    "status": "FILLED",
+                    "source": f"mech:{result.get('reason', '?')}",
+                    "reason": f"Auto-close: {result.get('reason', '?')}",
+                    "timestamp": result.get("timestamp"),
+                })
 
         print(f"\n```json\n{json.dumps(results, ensure_ascii=False, indent=2)}\n```")
     else:
@@ -224,8 +239,8 @@ def cmd_check_and_close_positions(config: dict, risk_limits: dict) -> int:
     return 0
 
 
-def cmd_close_position(config: dict, ticker: str, quantity: int) -> int:
-    """手動でポジションをクローズする。"""
+def cmd_close_position(config: dict, ticker: str, quantity: int, source: str = "manual") -> int:
+    """ポジションをクローズする。source は記録用 (manual / ai_exit / ai_trim / swap)。"""
     broker = load_or_create_broker(config)
     positions = broker.get_positions()
 
@@ -278,7 +293,8 @@ def cmd_close_position(config: dict, ticker: str, quantity: int) -> int:
         "fill_price": order.fill_price,
         "status": order.status.value,
         "pnl": round(estimated_pnl, 2) if estimated_pnl is not None else None,
-        "reason": f"Manual close: {quantity} shares",
+        "source": source,
+        "reason": f"{source}: {quantity} shares",
         "timestamp": datetime.now(UTC).isoformat(),
     }
 

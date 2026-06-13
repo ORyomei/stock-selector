@@ -283,7 +283,7 @@ def _run_ai_exit_advisor(
             if dry_run:
                 log(f"  [DRY] AI{a['action']}: {ticker} {qty}株 — {a['reason']}")
                 continue
-            out, rc = run_trade_cmd(["--close", ticker, str(qty)])
+            out, rc = run_trade_cmd(["--close", ticker, str(qty), "--source", f"ai_{a['action']}"])
             ok = rc == 0 and "FILLED" in out
             log(f"  {'✅' if ok else '❌'} AI{a['action']}: {ticker} {qty}株 "
                 f"({'約定' if ok else '失敗'}) — {a['reason']}")
@@ -707,7 +707,7 @@ def _execute_signals(
             if sell_pos:
                 qty = sell_pos.get("quantity", 0)
                 log(f"  売り: {sell_ticker} {qty}株...")
-                out, rc = run_trade_cmd(["--close", sell_ticker, str(qty)])
+                out, rc = run_trade_cmd(["--close", sell_ticker, str(qty), "--source", "swap"])
                 ok = rc == 0 and "FILLED" in out
                 log(f"    {'✅' if ok else '❌'} {sell_ticker} {'クローズ完了' if ok else 'クローズ失敗'}")
                 if not ok:

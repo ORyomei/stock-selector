@@ -57,6 +57,42 @@ def test_trace_to_dot():
     assert dot.count("->") == 4  # 5ノード(開始+3ツール+最終判断)= 4エッジ
 
 
+def test_source_category():
+    assert dd._source_category("ai_exit") == "AI手仕舞い"
+    assert dd._source_category("ai_trim") == "AI手仕舞い"
+    assert dd._source_category("mech:stop_loss") == "機械ストップ"
+    assert dd._source_category("swap") == "スワップ"
+    assert dd._source_category("manual") == "手動"
+    assert dd._source_category("legacy") == "legacy(タグ付け前)"
+
+
+def test_performance_by_source(monkeypatch):
+    trades = [
+        {"action": "BUY", "ticker": "X.T", "pnl": 0, "source": "ai_entry"},  # 除外(BUY)
+        {"action": "CLOSE", "ticker": "A.T", "pnl": 1000, "source": "ai_exit"},
+        {"action": "CLOSE", "ticker": "B.T", "pnl": -400, "source": "ai_exit"},
+        {"action": "CLOSE", "ticker": "C.T", "pnl": -300, "source": "mech:stop_loss"},
+        {"action": "CLOSE", "ticker": "D.T", "pnl": 200, "source": None},  # legacy
+    ]
+
+    class _D:
+        def load_recent_trades(self, days=30):
+            return trades
+
+    class _C:
+        def diary(self):
+            return _D()
+
+    monkeypatch.setattr(dd, "get_container", lambda: _C())
+    out = dd.performance_by_source()
+    assert out["total_closed"] == 4  # BUY 除外
+    ai = out["by_category"]["AI手仕舞い"]
+    assert ai["count"] == 2 and ai["wins"] == 1 and ai["win_rate"] == 50.0
+    assert ai["total_pnl"] == 600  # 1000-400
+    assert out["by_category"]["機械ストップ"]["count"] == 1
+    assert out["by_category"]["legacy(タグ付け前)"]["count"] == 1
+
+
 def test_portfolio_overview_shape(monkeypatch):
     """ブローカーを触らず portfolio.json (repo) から組み立てる。"""
     fake_pf = {

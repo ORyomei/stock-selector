@@ -214,6 +214,61 @@ def performance(days: int = 90) -> dict[str, Any]:
     }
 
 
+def _source_category(src: str) -> str:
+    """決定ソースを比較カテゴリにまとめる。"""
+    if src.startswith("ai_"):
+        return "AI手仕舞い"
+    if src.startswith("mech:"):
+        return "機械ストップ"
+    if src == "swap":
+        return "スワップ"
+    if src == "manual":
+        return "手動"
+    return "legacy(タグ付け前)"
+
+
+def _agg_pnl(items: list[float]) -> dict[str, Any]:
+    if not items:
+        return {"count": 0}
+    wins = [x for x in items if x > 0]
+    losses = [x for x in items if x < 0]
+    total = sum(items)
+    return {
+        "count": len(items),
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": round(len(wins) / len(items) * 100, 1),
+        "total_pnl": round(total, 0),
+        "avg_pnl": round(total / len(items), 0),
+    }
+
+
+def performance_by_source(days: int = 120) -> dict[str, Any]:
+    """決定ソース別の実現損益を集計 (AI手仕舞い vs 機械ストップ 等の比較)。
+
+    ※ 観測ベースの帰属であり無作為化A/Bではない (AIは弱含み銘柄を早期手仕舞い
+    する傾向があるため選択バイアスがある)。因果ではなく実績の内訳として読む。
+    """
+    trades = get_container().diary().load_recent_trades(days=days)
+    closed = [
+        t for t in trades
+        if str(t.get("action", "")) in {"CLOSE", "SELL", "close", "sell"}
+        and isinstance(t.get("pnl"), int | float)
+    ]
+    by_source: dict[str, list[float]] = {}
+    by_cat: dict[str, list[float]] = {}
+    for t in closed:
+        src = t.get("source") or "legacy"
+        pnl = float(t["pnl"])
+        by_source.setdefault(src, []).append(pnl)
+        by_cat.setdefault(_source_category(src), []).append(pnl)
+    return {
+        "total_closed": len(closed),
+        "by_category": {k: _agg_pnl(v) for k, v in by_cat.items()},
+        "by_source": {k: _agg_pnl(v) for k, v in by_source.items()},
+    }
+
+
 # ── signals / activity / AI insights ─────────────────────────────
 
 
