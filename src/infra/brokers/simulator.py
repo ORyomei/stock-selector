@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from domain.models import (
+    Balance,
     Order,
     OrderSide,
     OrderStatus,
@@ -78,7 +79,7 @@ class BrokerSimulator(BrokerInterface):
             pass
         return default
 
-    def get_balance(self) -> dict[str, Any]:
+    def get_balance(self) -> Balance:
         """残高取得"""
         return {
             "cash_jpy": self._balance["cash_jpy"],

@@ -33,6 +33,7 @@ from typing import Any
 import requests
 
 from domain.models import (
+    Balance,
     Order,
     OrderSide,
     OrderStatus,
@@ -258,7 +259,7 @@ class KabuStationBroker(BrokerInterface):
             logger.warning(f"get_trading_unit 失敗 ({ticker}): {exc}")
         return 100 if ticker.endswith(".T") else 1
 
-    def get_balance(self) -> dict[str, Any]:
+    def get_balance(self) -> Balance:
         """買付余力を取得。"""
         data = self._request("GET", "/wallet/cash")
         # 口座タイプにより値が入るフィールドが異なる
@@ -268,12 +269,13 @@ class KabuStationBroker(BrokerInterface):
             or data.get("AuJbnStockAccountWallet")
             or 0
         )
-        self._balance_cache = {
+        balance: Balance = {
             "cash_jpy": cash_jpy,
             "cash_usd": 0.0,
             "timestamp": datetime.now(UTC),
         }
-        return self._balance_cache
+        self._balance_cache = balance
+        return balance
 
     def place_order(
         self,

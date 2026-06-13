@@ -9,7 +9,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypedDict
+
+
+class Balance(TypedDict):
+    """残高 (get_balance の戻り)。TypedDict なのでランタイムは dict のまま、
+    静的型検査だけが効く (既存の .get()/[] アクセスを壊さない)。"""
+
+    cash_jpy: float
+    cash_usd: float
+    timestamp: datetime
 
 
 class OrderSide(StrEnum):

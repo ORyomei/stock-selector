@@ -7,9 +7,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
-from domain.models import Order, OrderSide, OrderType, Position
+from domain.models import Balance, Order, OrderSide, OrderType, Position
 
 
 class BrokerInterface(ABC):
@@ -19,16 +18,8 @@ class BrokerInterface(ABC):
     """
 
     @abstractmethod
-    def get_balance(self) -> dict[str, Any]:
-        """残高取得
-
-        Returns:
-            {
-                "cash_jpy": float,
-                "cash_usd": float,
-                "timestamp": datetime
-            }
-        """
+    def get_balance(self) -> Balance:
+        """残高取得 (cash_jpy / cash_usd / timestamp)。"""
         pass
 
     @abstractmethod
