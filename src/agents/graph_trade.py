@@ -104,6 +104,7 @@ def _build_system_prompt(
     dry_run: bool,
     scenario: str = "neutral",
     scenarios_cfg: dict[str, Any] | None = None,
+    lessons: str = "",
 ) -> str:
     """Build the system prompt with current portfolio + market-regime context."""
     held = get_held_tickers()
@@ -138,6 +139,13 @@ def _build_system_prompt(
     questions_block = "\n".join(f"  {i+1}. {q}" for i, q in enumerate(questions))
     extra_rules_block = "\n".join(f"- {r}" for r in extra_rules) if extra_rules else "- （追加ルールなし）"
 
+    # 過去トレードからの教訓 (振り返りループ)。空なら丸ごと省略。
+    lessons_block = (
+        f"\n## 📚 過去トレードからの教訓（直近実績を踏まえ判断に反映すること）\n{lessons.strip()}\n"
+        if lessons.strip()
+        else ""
+    )
+
     # Stringency by scenario (aligns with validation_rules.json)
     stringency = {
         "risk_on": "fail_conditions は 1 項目以上、invalidation_conditions は 0 項目以上（任意）",
@@ -156,7 +164,7 @@ def _build_system_prompt(
 
 ## 🌐 市場シナリオ: {scen_label} ({scenario})
 {scen_desc}
-
+{lessons_block}
 ## ポートフォリオ状況
 - ポジション: {cur_pos}/{max_pos} (空き: {available})
 - 保有銘柄:
@@ -283,6 +291,22 @@ def _run_ai_exit_advisor(
         log(f"  ⚠️ AI手仕舞いステップでエラー (機械ストップは適用済み): {e}")
 
 
+def _reflect_if_enabled(provider: str, model: str | None, log: Any) -> str:
+    """trading_config の ai_reflection が有効なら過去実績の教訓を返す (既定 False)。"""
+    try:
+        from core.trade import load_config
+
+        if not load_config().get("ai_reflection", False):
+            return ""
+        from agents.reflection import reflect_on_history
+
+        log("\nStep 1.8: 振り返り学習 (過去のクローズ実績から教訓抽出)...")
+        return reflect_on_history(provider=provider, model=model, log=log)
+    except Exception as e:
+        log(f"  ⚠️ 振り返りステップでエラー: {e}")
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Core graph execution
 # ---------------------------------------------------------------------------
@@ -350,12 +374,15 @@ def run_trade_graph(
     #   未発火の保有に対し「より早い手仕舞い」だけを助言。AI はストップを止められない。
     _run_ai_exit_advisor(scenario, provider, model, dry_run, log)
 
+    # Step 1.8: 振り返り学習 — 過去のクローズ実績から教訓を抽出しエントリー判断に反映
+    lessons = _reflect_if_enabled(provider, model, log)
+
     # Step 2: ReAct agent analysis
     log("\nStep 2: AI分析エージェント起動...")
     llm = get_chat_model(provider=provider, model=model)
     system_prompt = _build_system_prompt(
         market, min_score, max_signals, dry_run,
-        scenario=scenario, scenarios_cfg=scenarios_cfg,
+        scenario=scenario, scenarios_cfg=scenarios_cfg, lessons=lessons,
     )
     # シグナル提出は構造化ツール経由 (スキーマ強制でフィールド欠落を根絶)
     captured: dict[str, Any] = {}
