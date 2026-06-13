@@ -630,7 +630,12 @@ def run_screen(
         for done, future in enumerate(as_completed(futures), 1):
             if done % 20 == 0:
                 print(f"  進捗: {done}/{len(universe)}", file=sys.stderr)
-            result = future.result()
+            ticker = futures[future]
+            try:
+                result = future.result()
+            except Exception as e:  # 例外で銘柄が黙って欠落するのを防ぐ (どの銘柄か記録)
+                print(f"  ⚠️ {ticker} 分析失敗: {e}", file=sys.stderr)
+                result = None
             if result:
                 results.append(result)
 

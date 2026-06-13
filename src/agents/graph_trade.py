@@ -284,7 +284,7 @@ def _run_ai_exit_advisor(
                 log(f"  [DRY] AI{a['action']}: {ticker} {qty}株 — {a['reason']}")
                 continue
             out, rc = run_trade_cmd(["--close", ticker, str(qty), "--source", f"ai_{a['action']}"])
-            ok = rc == 0 and "FILLED" in out
+            ok = rc == 0 and '"status": "FILLED"' in out
             log(f"  {'✅' if ok else '❌'} AI{a['action']}: {ticker} {qty}株 "
                 f"({'約定' if ok else '失敗'}) — {a['reason']}")
     except Exception as e:
@@ -708,7 +708,7 @@ def _execute_signals(
                 qty = sell_pos.get("quantity", 0)
                 log(f"  売り: {sell_ticker} {qty}株...")
                 out, rc = run_trade_cmd(["--close", sell_ticker, str(qty), "--source", "swap"])
-                ok = rc == 0 and "FILLED" in out
+                ok = rc == 0 and '"status": "FILLED"' in out
                 log(f"    {'✅' if ok else '❌'} {sell_ticker} {'クローズ完了' if ok else 'クローズ失敗'}")
                 if not ok:
                     executed.append({"ticker": sell_ticker, "status": "SELL_FAILED", "score": 0})
@@ -754,7 +754,7 @@ def _execute_signals(
         sig_name = f"{sig['ticker'].replace('.', '')}_auto.json"
         sig_path = diary.save_signal(sig_name, buy_sig)
         out, rc = run_trade_cmd(["--from-signal", sig_path])
-        ok = rc == 0 and "FILLED" in out
+        ok = rc == 0 and '"status": "FILLED"' in out
         log(f"  {'✅' if ok else '❌'} {sig['ticker']} {'約定成功' if ok else '約定失敗'}")
         executed.append(
             {"ticker": sig["ticker"], "status": "FILLED" if ok else "FAILED", "score": sig.get("score", 0)}

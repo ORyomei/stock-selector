@@ -89,15 +89,24 @@ _container: RepositoryContainer | None = None
 
 def get_container(
     *,
-    ai_provider: str = "copilot",
+    ai_provider: str | None = None,
     ai_model: str | None = None,
 ) -> RepositoryContainer:
-    """アプリケーション全体で共有するコンテナを取得する。"""
+    """アプリケーション全体で共有するコンテナを取得する。
+
+    ai_provider/ai_model を明示指定した場合は既存コンテナでも上書きする
+    (初回の値が焼き付くのを防ぐ)。未指定 (None) の呼び出しは設定を変えない。
+    """
     global _container
     if _container is None:
         _container = RepositoryContainer()
-        _container.config.ai_provider.from_value(ai_provider)
+        _container.config.ai_provider.from_value(ai_provider or "copilot")
         _container.config.ai_model.from_value(ai_model)
+    else:
+        if ai_provider is not None:
+            _container.config.ai_provider.from_value(ai_provider)
+        if ai_model is not None:
+            _container.config.ai_model.from_value(ai_model)
     return _container
 
 

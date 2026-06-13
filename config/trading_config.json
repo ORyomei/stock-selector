@@ -1,5 +1,4 @@
 {
-  "mode": "simulator",
   "broker": "simulator",
   "ai_exit_advisor": true,
   "ai_reflection": true,
@@ -17,10 +16,5 @@
     "default_exchange": 1,
     "account_type": 4,
     "timeout": 10
-  },
-  "live": {
-    "api_endpoint": "https://api.dmmfx.com/v1",
-    "api_key_env": "DMMFX_API_KEY",
-    "sandbox_mode": false
   }
 }

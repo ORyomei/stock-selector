@@ -368,8 +368,7 @@ class BrokerSimulator(BrokerInterface):
         return {
             "metadata": {
                 "last_updated": datetime.now(UTC).isoformat(),
-                "broker": "dmmfx",
-                "mode": "simulator",
+                "broker": "simulator",
             },
             "balance": {
                 "cash_jpy": self._balance["cash_jpy"],
