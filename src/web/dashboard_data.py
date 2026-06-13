@@ -23,6 +23,7 @@ USD_JPY = 150.0  # 概算換算 (表示用)
 LOCK_FILE = SRC_DIR.parent / ".auto_trade.lock"
 DAEMON_LOG = SRC_DIR.parent / "logs" / "auto_trade_daemon.log"
 SIGNALS_DIR = DIARY_DIR / "signals"
+TRACES_DIR = DIARY_DIR / "traces"
 
 
 # 既知ETFの表示名 (yfinance は運用会社名を返すため正しいファンド名で上書き)
@@ -240,6 +241,52 @@ def recent_signals(n: int = 8) -> list[dict[str, Any]]:
 
 def recent_cycle_log(n_lines: int = 60) -> str:
     return "\n".join(_tail(DAEMON_LOG, n_lines))
+
+
+# ── AI 思考トレース ──────────────────────────────────────────────
+
+
+def recent_traces(n: int = 20) -> list[str]:
+    """新しい順の思考トレースファイル名 (拡張子なし) 一覧。"""
+    try:
+        files = sorted(TRACES_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:n]
+        return [f.stem for f in files]
+    except OSError:
+        return []
+
+
+def load_trace(name: str) -> list[dict[str, Any]]:
+    """指定トレースのステップ列を返す (見つからなければ空)。"""
+    try:
+        path = TRACES_DIR / f"{name}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        steps = data.get("steps", [])
+        return steps if isinstance(steps, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def trace_to_dot(steps: list[dict[str, Any]]) -> str:
+    """ツール呼び出し列を Graphviz DOT (有向フロー) に変換する。"""
+    nodes: list[str] = ["開始"]
+    for s in steps:
+        if s.get("type") == "tool_call":
+            tool = s.get("tool", "?")
+            args = s.get("args", {}) or {}
+            key = args.get("ticker") or args.get("query") or args.get("market") or ""
+            label = f"{tool}\\n{key}" if key else tool
+            nodes.append(label)
+    nodes.append("最終判断")
+
+    lines = ["digraph trace {", "  rankdir=LR;", '  node [shape=box, style=rounded, fontsize=10];']
+    for i, label in enumerate(nodes):
+        color = "#cce5ff" if label in ("開始", "最終判断") else (
+            "#d4edda" if label.startswith("submit_signals") else "#ffffff")
+        lines.append(f'  n{i} [label="{label}", style="rounded,filled", fillcolor="{color}"];')
+    for i in range(len(nodes) - 1):
+        lines.append(f"  n{i} -> n{i+1};")
+    lines.append("}")
+    return "\n".join(lines)
 
 
 def ai_insights() -> dict[str, Any]:

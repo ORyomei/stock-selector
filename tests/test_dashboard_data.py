@@ -38,6 +38,25 @@ def test_close_reason_bucket():
     assert dd._close_reason_bucket("Order filled: 100 @ 50") == "other"
 
 
+def test_trace_to_dot():
+    """ツール呼び出し列が開始→各ツール→最終判断の有向グラフ DOT になる。"""
+    steps = [
+        {"type": "user", "text": "分析して"},
+        {"type": "tool_call", "tool": "check_macro", "args": {}},
+        {"type": "tool_result", "tool": "check_macro", "summary": "..."},
+        {"type": "tool_call", "tool": "score_stock", "args": {"ticker": "7203.T"}},
+        {"type": "tool_call", "tool": "submit_signals", "args": {"signals": []}},
+        {"type": "final", "text": "買い"},
+    ]
+    dot = dd.trace_to_dot(steps)
+    assert "digraph" in dot
+    assert "check_macro" in dot
+    assert "score_stock\\n7203.T" in dot  # 主要引数がラベルに出る
+    assert "submit_signals" in dot
+    assert "開始" in dot and "最終判断" in dot
+    assert dot.count("->") == 4  # 5ノード(開始+3ツール+最終判断)= 4エッジ
+
+
 def test_portfolio_overview_shape(monkeypatch):
     """ブローカーを触らず portfolio.json (repo) から組み立てる。"""
     fake_pf = {

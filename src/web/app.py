@@ -149,6 +149,45 @@ try:
 except Exception as e:
     st.error(f"シグナル取得エラー: {e}")
 
+# ── AI 思考トレース ──────────────────────────────────────────────
+st.subheader("🧠 AI 思考トレース")
+try:
+    traces = dd.recent_traces()
+    if not traces:
+        st.caption("トレースなし（次の実サイクルで生成されます）")
+    else:
+        sel = st.selectbox("サイクルを選択", traces, index=0)
+        steps = dd.load_trace(sel)
+        if steps:
+            st.markdown("**フロー（ツール呼び出しの流れ）**")
+            st.graphviz_chart(dd.trace_to_dot(steps))
+
+            st.markdown("**タイムライン**")
+            icon = {"user": "👤", "reasoning": "💭", "tool_call": "🔧",
+                    "tool_result": "↩️", "final": "✅"}
+            for i, s in enumerate(steps, 1):
+                t = s["type"]
+                if t == "tool_call":
+                    args = s.get("args", {}) or {}
+                    arg_s = ", ".join(f"{k}={v}" for k, v in args.items() if k != "signals")
+                    head = f"{icon[t]} **{s['tool']}**" + (f"（{arg_s}）" if arg_s else "")
+                    with st.expander(f"{i}. {head}", expanded=False):
+                        st.json(args)
+                elif t == "tool_result":
+                    with st.expander(f"{i}. ↩️ {s['tool']} の結果", expanded=False):
+                        st.text(s.get("summary", ""))
+                elif t == "reasoning":
+                    st.markdown(f"{i}. 💭 _{s['text']}_")
+                elif t == "final":
+                    st.markdown(f"{i}. ✅ **最終判断**")
+                    st.info(s["text"])
+                elif t == "user":
+                    st.markdown(f"{i}. 👤 {s['text']}")
+        else:
+            st.caption("（トレース読み込み失敗）")
+except Exception as e:
+    st.error(f"トレース取得エラー: {e}")
+
 # ── サイクルログ ─────────────────────────────────────────────────
 with st.expander("🗒 デーモンログ（直近60行）"):
     try:
