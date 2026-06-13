@@ -506,6 +506,13 @@ def run_trade_graph(
         signals = valid_sigs
         rejected = invalid_sigs
 
+    # Step 3.55: ポートフォリオ単位の AI 推論 — セクター/テーマ過集中を抑制 (機械的上限に加える定性チェック)
+    if signals:
+        from agents.portfolio_review import review_portfolio
+
+        log("\nStep 3.55: ポートフォリオ分散チェック (AI)...")
+        signals = review_portfolio(signals, provider=provider, model=model, log=log)
+
     # Step 3.6: 日次損失サーキットブレーカー (非LLM) — 自動クローズは実行済みだが新規買いは止める
     if signals and daily_loss_exceeded(log):
         log("  → 日次損失上限を超過したため新規買いをスキップ")
