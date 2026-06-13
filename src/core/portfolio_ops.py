@@ -114,6 +114,7 @@ def _denormalize(flat: dict[str, Any]) -> dict[str, Any]:
             "stop_loss": h.get("stop_loss"),
             "take_profit": h.get("take_profit"),
             "peak_price": prev.get("peak_price", entry_price),
+            "timespan": prev.get("timespan", "swing"),
         })
 
     prev_balance = raw.get("balance", {})

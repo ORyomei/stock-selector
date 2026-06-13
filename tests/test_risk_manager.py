@@ -147,6 +147,29 @@ def test_trailing_stop_inactive_before_profit():
     assert not should  # entry-2% 程度では即クローズしない (旧バグの挙動を防ぐ)
 
 
+def test_max_hold_by_timespan():
+    """timespan 別の保有日数上限が適用される。"""
+    from datetime import timedelta
+
+    rm = RiskManager({
+        "max_position_size_pct": PCT,
+        "max_hold_days": 30,
+        "max_hold_days_by_timespan": {"short": 5, "swing": 21, "medium": 60},
+    })
+    old = datetime.now(UTC) - timedelta(days=10)
+    # short: 10日 >= 5 → クローズ
+    short_pos = Position(ticker="X.T", quantity=100, entry_price=1000, current_price=1000,
+                         entry_time=old, stop_loss=900, take_profit=2000, timespan="short")
+    should, reason = rm.should_close_position(short_pos, 1000)
+    assert should and "hold_timeout" in reason
+
+    # medium: 10日 < 60 → 保持
+    med_pos = Position(ticker="Y.T", quantity=100, entry_price=1000, current_price=1000,
+                       entry_time=old, stop_loss=900, take_profit=2000, timespan="medium")
+    should2, _ = rm.should_close_position(med_pos, 1000)
+    assert not should2
+
+
 def test_peak_price_ratchets_up_not_down():
     """__post_init__ で高値は切り上がり、下落では下がらない。"""
     pos = Position(ticker="X", quantity=1, entry_price=1000, current_price=1000,

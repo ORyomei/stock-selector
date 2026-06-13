@@ -284,6 +284,7 @@ class KabuStationBroker(BrokerInterface):
         entry_price: float = 0.0,
         stop_loss: float | None = None,
         take_profit: float | None = None,
+        timespan: str = "swing",  # 受け取るが kabu はポジションに保持しない (API がホールド期間を持たない)
     ) -> Order:
         """現物注文を発注する。"""
         symbol, exchange = self._parse_ticker(ticker, for_order=True)

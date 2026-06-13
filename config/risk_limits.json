@@ -7,5 +7,11 @@
   "trailing_stop_pct": 2,
   "max_loss_per_position_pct": 5,
   "max_hold_days": 30,
+  "max_hold_days_by_timespan": {
+    "short": 5,
+    "swing": 21,
+    "medium": 60,
+    "long": 180
+  },
   "forbidden_tickers": []
 }

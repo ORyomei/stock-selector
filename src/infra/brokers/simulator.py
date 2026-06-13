@@ -53,6 +53,7 @@ class BrokerSimulator(BrokerInterface):
         self._market_data = market_data
         self._repo = repo
         self.spread_pct = config.get("spread_pct", 0.02)
+        self._pending_timespan = "swing"  # place_order → _add_or_update_position に渡す一時値
 
         # 資金管理
         self._balance = {
@@ -94,8 +95,10 @@ class BrokerSimulator(BrokerInterface):
         entry_price: float = 0.0,
         stop_loss: float | None = None,
         take_profit: float | None = None,
+        timespan: str = "swing",
     ) -> Order:
         """注文発注"""
+        self._pending_timespan = timespan  # _simulate_fill → _add_or_update_position に伝搬
         if quantity <= 0:
             raise ValueError(f"Invalid quantity: {quantity}")
 
@@ -323,6 +326,7 @@ class BrokerSimulator(BrokerInterface):
             entry_time=datetime.now(UTC),
             stop_loss=stop_loss,
             take_profit=take_profit,
+            timespan=getattr(self, "_pending_timespan", "swing"),
         )
         self._positions.append(pos)
 
@@ -385,6 +389,7 @@ class BrokerSimulator(BrokerInterface):
                     "stop_loss": pos.stop_loss,
                     "take_profit": pos.take_profit,
                     "peak_price": pos.peak_price,
+                    "timespan": pos.timespan,
                 }
                 for pos in self._positions
             ],
@@ -484,6 +489,7 @@ class BrokerSimulator(BrokerInterface):
                 stop_loss=pos_data.get("stop_loss"),
                 take_profit=pos_data.get("take_profit"),
                 peak_price=self._finite_float(pos_data.get("peak_price"), entry_price),
+                timespan=pos_data.get("timespan", "swing"),
             )
             self._positions.append(pos)
 

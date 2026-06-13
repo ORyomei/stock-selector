@@ -205,6 +205,7 @@ def _apply_sync(
             "stop_loss": pos.stop_loss,
             "take_profit": pos.take_profit,
             "peak_price": pos.peak_price,
+            "timespan": getattr(pos, "timespan", "swing"),
         })
 
     # 残高: 管理対象通貨のみブローカー値で上書き、管理外 (例: USD) はローカルを温存

@@ -107,6 +107,7 @@ class TradeExecutor:
                 entry_price=order.entry_price,
                 stop_loss=order.stop_loss,
                 take_profit=order.take_profit,
+                timespan=signal.timespan.value,
             )
 
             result["order_id"] = placed_order.id

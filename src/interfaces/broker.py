@@ -41,6 +41,7 @@ class BrokerInterface(ABC):
         entry_price: float = 0.0,
         stop_loss: float | None = None,
         take_profit: float | None = None,
+        timespan: str = "swing",
     ) -> Order:
         """注文発注
 

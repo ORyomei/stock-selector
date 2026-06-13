@@ -217,13 +217,17 @@ class RiskManager:
         if pnl_pct <= -max_loss_pct:
             return True, f"max_loss_{max_loss_pct}pct"
 
-        # 5. 保有日数タイムアウト（長く持ちすぎ）
+        # 5. 保有日数タイムアウト（timespan 別。short ほど短く、medium ほど長く保持）
+        #    ※ kabu は建玉日を API から取れず entry_time=now になるため、この判定は
+        #      ローカルが状態を持つ simulator でのみ実効的。
         from datetime import datetime
 
         hold_days = (datetime.now(UTC) - position.entry_time).days
-        max_hold = self.config.get("max_hold_days", 30)
+        by_span = self.config.get("max_hold_days_by_timespan", {})
+        timespan = getattr(position, "timespan", "swing")
+        max_hold = by_span.get(timespan, self.config.get("max_hold_days", 30))
         if hold_days >= max_hold:
-            return True, f"hold_timeout_{hold_days}d"
+            return True, f"hold_timeout_{hold_days}d({timespan})"
 
         return False, ""
 

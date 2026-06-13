@@ -114,6 +114,7 @@ class Position:
     stop_loss: float | None = None
     take_profit: float | None = None
     peak_price: float | None = None  # 取得後の最高値（トレーリングストップ用）
+    timespan: str = "swing"  # 推奨ホールド期間 (short/swing/medium/long) — max_hold 判定に使用
     pnl: float = field(default=0.0, init=False)
     pnl_pct: float = field(default=0.0, init=False)
 
@@ -141,6 +142,7 @@ class Position:
             "stop_loss": self.stop_loss,
             "take_profit": self.take_profit,
             "peak_price": self.peak_price,
+            "timespan": self.timespan,
             "pnl": round(self.pnl, 2),
             "pnl_pct": round(self.pnl_pct, 2),
         }
