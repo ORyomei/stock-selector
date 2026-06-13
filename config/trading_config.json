@@ -1,6 +1,7 @@
 {
   "mode": "simulator",
   "broker": "simulator",
+  "ai_exit_advisor": true,
   "simulator": {
     "initial_capital_jpy": 3000000,
     "initial_capital_usd": 0,

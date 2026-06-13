@@ -222,6 +222,68 @@ JSON ブロックがないと注文が実行されません。
 
 
 # ---------------------------------------------------------------------------
+# AI exit advisor (Step 1.7) — 機械ストップは床として維持
+# ---------------------------------------------------------------------------
+
+def _ai_exit_enabled() -> bool:
+    """trading_config の ai_exit_advisor フラグ (既定 False = 安全側)。"""
+    try:
+        from core.trade import load_config
+
+        return bool(load_config().get("ai_exit_advisor", False))
+    except Exception:
+        return False
+
+
+def _run_ai_exit_advisor(
+    scenario: str, provider: str, model: str | None, dry_run: bool, log: Any
+) -> None:
+    """機械クローズ後に残った保有へ AI の早期手仕舞い助言を適用する。
+
+    AI は exit (全株) / trim (半分) のみ助言でき、機械ストップは止められない。
+    助言が得られなければ何もしない (= 機械ストップのみ)。
+    """
+    if not _ai_exit_enabled():
+        return
+    try:
+        from agents.exit_advisor import advise_exits
+        from core.trading_units import get_trading_unit
+
+        log("\nStep 1.7: AI手仕舞い助言 (機械ストップは適用済み)...")
+        positions = get_container().broker().get_positions()
+        if not positions:
+            log("  -> 保有なし")
+            return
+        by_ticker = {p.ticker: p for p in positions}
+        actions = advise_exits(positions, scenario, provider=provider, model=model, log=log)
+
+        for a in actions:
+            ticker = a["ticker"]
+            pos = by_ticker.get(ticker)
+            if pos is None:
+                continue
+            held_qty = int(pos.quantity)
+            if a["action"] == "trim":
+                unit = get_trading_unit(ticker)
+                qty = (held_qty // 2 // unit) * unit if unit > 0 else held_qty // 2
+                if qty <= 0:
+                    log(f"  -> {ticker}: trim 不可 (単元未満) — スキップ")
+                    continue
+            else:  # exit
+                qty = held_qty
+
+            if dry_run:
+                log(f"  [DRY] AI{a['action']}: {ticker} {qty}株 — {a['reason']}")
+                continue
+            out, rc = run_trade_cmd(["--close", ticker, str(qty)])
+            ok = rc == 0 and "FILLED" in out
+            log(f"  {'✅' if ok else '❌'} AI{a['action']}: {ticker} {qty}株 "
+                f"({'約定' if ok else '失敗'}) — {a['reason']}")
+    except Exception as e:
+        log(f"  ⚠️ AI手仕舞いステップでエラー (機械ストップは適用済み): {e}")
+
+
+# ---------------------------------------------------------------------------
 # Core graph execution
 # ---------------------------------------------------------------------------
 
@@ -283,6 +345,10 @@ def run_trade_graph(
 
     # Step 1.6: ポートフォリオ健全性チェック (非LLM) — 集中超過の警告
     warn_overweight_positions(log)
+
+    # Step 1.7: AI 手仕舞い助言 (機械ストップは Step 1 で実行済み=床)。
+    #   未発火の保有に対し「より早い手仕舞い」だけを助言。AI はストップを止められない。
+    _run_ai_exit_advisor(scenario, provider, model, dry_run, log)
 
     # Step 2: ReAct agent analysis
     log("\nStep 2: AI分析エージェント起動...")
