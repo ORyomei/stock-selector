@@ -93,11 +93,43 @@ try:
 
         curve = perf["equity_curve"]
         if curve:
-            import pandas as pd
+            from streamlit_echarts import JsCode, st_echarts
 
-            df = pd.DataFrame(curve)
-            df = df.set_index("date")
-            st.line_chart(df, y="cum_pnl", height=240)
+            # ECharts: dataZoom(inside=スクロール/ドラッグ, slider=下部バー)。
+            # filterMode='filter' で横ズーム時に範囲外の点を除外 → yAxis(scale=True)が
+            # 表示範囲の最大・最小に自動再計算される。
+            yen_axis = JsCode("function(v){return '¥'+Number(v).toLocaleString();}").js_code
+            tooltip_fmt = JsCode(
+                "function(ps){var p=ps[0];"
+                "return p.axisValueLabel+'<br/>累積損益: ¥'+Number(p.value[1]).toLocaleString();}"
+            ).js_code
+            options = {
+                "tooltip": {"trigger": "axis", "formatter": tooltip_fmt},
+                "grid": {"left": 72, "right": 24, "top": 24, "bottom": 64},
+                "xAxis": {"type": "time"},
+                "yAxis": {
+                    "type": "value",
+                    "name": "累積損益(¥)",
+                    "scale": True,  # 0 を強制せず表示範囲の min/max にフィット
+                    "axisLabel": {"formatter": yen_axis},
+                },
+                "dataZoom": [
+                    {"type": "inside", "filterMode": "filter"},
+                    {"type": "slider", "filterMode": "filter", "height": 22, "bottom": 12},
+                ],
+                "series": [
+                    {
+                        "name": "累積実現損益",
+                        "type": "line",
+                        "showSymbol": True,
+                        "smooth": False,
+                        "areaStyle": {"opacity": 0.12},
+                        "data": [[c["date"], c["cum_pnl"]] for c in curve],
+                    }
+                ],
+            }
+            st_echarts(options=options, height="320px")
+            st.caption("マウススクロール/ドラッグで横軸をズーム(下部バーでも可)。縦軸は表示範囲の最大・最小に自動フィットします")
 
         by_reason = perf["by_reason"]
         if by_reason:
