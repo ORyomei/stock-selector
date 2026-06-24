@@ -35,8 +35,14 @@ def create_broker(
 
     # default: simulator — repo を注入し、ミューテーション毎に自己永続化させる
     broker = BrokerSimulator(config["simulator"], repo=portfolio_repo)
+    # load() はファイルが無い時のみ None を返す。balance だけ持つ「全現金・0ポジション」
+    # 状態も正当な保存状態なので復元する (positions が空 [] でも初期化リセットしない)。
     portfolio_data = portfolio_repo.load()
-    if portfolio_data and (portfolio_data.get("positions") or portfolio_data.get("holdings")):
+    if portfolio_data and (
+        portfolio_data.get("balance")
+        or portfolio_data.get("positions")
+        or portfolio_data.get("holdings")
+    ):
         broker.from_dict(portfolio_data)
         print("✅ ポートフォリオ復元")
     else:
