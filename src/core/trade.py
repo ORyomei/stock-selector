@@ -30,6 +30,7 @@ from domain.models import OrderSide, OrderType
 from trading import (
     OrderManager,
     RiskManager,
+    TimeSpan,
     TradeAction,
     TradeExecutor,
     TradingSignal,
@@ -73,6 +74,21 @@ def _normalize_action(raw: str) -> TradeAction:
     return TradeAction(raw)  # そのまま渡して ValueError で落とす
 
 
+def _normalize_timespan(raw: Any) -> TimeSpan:
+    """timespan を TimeSpan enum に変換する (JSON からは文字列で来る)。
+
+    TradingSignal.timespan は enum 型だが、シグナル JSON では "swing" 等の
+    文字列。enum に正規化しないと execute_signal 内の signal.timespan.value で
+    'str' object has no attribute 'value' となり発注が全滅する。
+    """
+    if isinstance(raw, TimeSpan):
+        return raw
+    try:
+        return TimeSpan(str(raw).strip().lower())
+    except ValueError:
+        return TimeSpan.SWING
+
+
 def load_signal_from_file(file_path: str) -> TradingSignal | None:
     """ファイルから TradingSignal を読み込む"""
     try:
@@ -86,7 +102,7 @@ def load_signal_from_file(file_path: str) -> TradingSignal | None:
             stop_loss_price=data["stop_loss_price"],
             take_profit_price=data["take_profit_price"],
             entry_price=data.get("entry_price", 0.0),
-            timespan=data.get("timespan", "swing"),
+            timespan=_normalize_timespan(data.get("timespan", "swing")),
             reason=data.get("reason", ""),
             score=data.get("score", 0),
         )
