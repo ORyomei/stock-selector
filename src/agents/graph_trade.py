@@ -106,6 +106,8 @@ def _build_system_prompt(
     scenario: str = "neutral",
     scenarios_cfg: dict[str, Any] | None = None,
     lessons: str = "",
+    hard_stats: str = "",
+    max_unit_cost_jpy: float | None = None,
 ) -> str:
     """Build the system prompt with current portfolio + market-regime context."""
     held = get_held_tickers()
@@ -147,6 +149,22 @@ def _build_system_prompt(
         else ""
     )
 
+    # 実測期待値 (ハード統計)。LLM 散文の教訓と別に、反論しにくい数字を渡す。
+    hard_stats_block = (
+        f"\n## 📊 実測期待値（あなた自身の過去成績。数字に基づき判断すること）\n{hard_stats.strip()}\n"
+        if hard_stats.strip()
+        else ""
+    )
+
+    # 執行可能上限: 1単元コストがこれを超える銘柄は執行段階で必ず弾かれるため、
+    # シグナル枠の無駄撃ちを防ぐようプロンプトで事前に伝える。
+    affordability_line = (
+        f"- 執行可能上限: 1単元コスト ¥{max_unit_cost_jpy:,.0f} 以下の銘柄のみ"
+        "（超える銘柄はシグナルを出しても執行されない。選ばないこと）"
+        if max_unit_cost_jpy and max_unit_cost_jpy > 0
+        else ""
+    )
+
     # Stringency by scenario (aligns with validation_rules.json)
     stringency = {
         "risk_on": "fail_conditions は 1 項目以上、invalidation_conditions は 0 項目以上（任意）",
@@ -162,10 +180,11 @@ def _build_system_prompt(
 - 最小スコア閾値: {min_score}
 - 最大シグナル数: {max_signals}
 - モード: {"ドライラン（注文なし）" if dry_run else "本番"}
+{affordability_line}
 
 ## 🌐 市場シナリオ: {scen_label} ({scenario})
 {scen_desc}
-{lessons_block}
+{lessons_block}{hard_stats_block}
 ## ポートフォリオ状況
 - ポジション: {cur_pos}/{max_pos} (空き: {available})
 - 保有銘柄:
@@ -359,6 +378,108 @@ def _reflect_if_enabled(provider: str, model: str | None, log: Any) -> str:
 # Core graph execution
 # ---------------------------------------------------------------------------
 
+def _hard_stats_safe() -> str:
+    """実測期待値のプロンプト注入テキスト。失敗時は空 (プロンプトに足さない)。"""
+    try:
+        from core.trade_stats import expectancy, format_for_prompt
+
+        return format_for_prompt(expectancy(days=120))
+    except Exception:
+        return ""
+
+
+def _max_unit_cost_jpy_safe() -> float | None:
+    """執行可能な1単元コスト上限 (総資産 × max_position_size_pct)。失敗時 None。"""
+    try:
+        from agents.portfolio_helpers import total_equity_jpy
+        from core.trade import load_risk_limits
+
+        max_pct = float(load_risk_limits().get("max_position_size_pct", 30))
+        equity = total_equity_jpy()
+        return equity * max_pct / 100 if equity > 0 else None
+    except Exception:
+        return None
+
+
+def _log_signal_outcomes(
+    executed: list[dict[str, Any]], rejected: list[dict[str, Any]], scenario: str
+) -> None:
+    """全シグナル結果を diary/signals_log.jsonl に追記する (P5: 仮想追跡)。
+
+    採用 (FILLED) だけでなく却下・スキップも記録することで、
+    「ゲートは良いシグナルを殺していないか」を後から検証できる。
+    失敗してもサイクルは止めない。
+    """
+    try:
+        diary = get_container().diary()
+        ts = datetime.now(UTC).isoformat()
+        for e in executed:
+            if e.get("status") == "DRY_RUN":
+                continue
+            diary.append_signal_log({
+                "ts": ts,
+                "scenario": scenario,
+                "ticker": e.get("ticker"),
+                "status": e.get("status"),
+                "score": e.get("score"),
+            })
+        for r in rejected:
+            diary.append_signal_log({
+                "ts": ts,
+                "scenario": scenario,
+                "ticker": r.get("ticker"),
+                "status": f"REJECTED:{r.get('_gate_rejection_reason', 'gate')}",
+                "score": r.get("score"),
+            })
+    except Exception as e:
+        print(f"⚠️ signal log skipped: {e}", file=sys.stderr)
+
+
+def _filter_affordable_signals(
+    signals: list[dict[str, Any]], log: Any
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """1単元コストが評価額上限を超える買いシグナルを事前に除外する。
+
+    swap (売却代金が入る) と価格不明のシグナルは判断できないため通す。
+    失敗時は全件通す (執行段階の SKIPPED_CAP が最終防衛線)。
+    """
+    try:
+        cap_jpy = _max_unit_cost_jpy_safe()
+        if not cap_jpy:
+            return signals, []
+        from agents.auto_trade import _order_cost
+        from agents.portfolio_helpers import USD_JPY_APPROX
+
+        kept: list[dict[str, Any]] = []
+        dropped: list[dict[str, Any]] = []
+        for sig in signals:
+            est_price = float(sig.get("target_price") or 0)
+            if sig.get("sell_ticker") or est_price <= 0:
+                kept.append(sig)
+                continue
+            try:
+                ccy, _lot, est_cost = _order_cost(sig["ticker"], est_price)
+            except Exception:
+                kept.append(sig)
+                continue
+            cost_jpy = est_cost if ccy == "JPY" else est_cost * USD_JPY_APPROX
+            if cost_jpy > cap_jpy:
+                log(
+                    f"  📏 {sig['ticker']}: 1単元≈¥{cost_jpy:,.0f} が評価額上限"
+                    f" ¥{cap_jpy:,.0f} 超 → ゲート前に除外"
+                )
+                dropped.append({
+                    "ticker": sig.get("ticker", "?"),
+                    "score": sig.get("score", 0),
+                    "_gate_rejection_reason": "unaffordable_unit_cost",
+                })
+            else:
+                kept.append(sig)
+        return kept, dropped
+    except Exception:
+        return signals, []
+
+
 def run_trade_graph(
     market: str = "all",
     min_score: int = 10,
@@ -432,6 +553,7 @@ def run_trade_graph(
     system_prompt = _build_system_prompt(
         market, min_score, max_signals, dry_run,
         scenario=scenario, scenarios_cfg=scenarios_cfg, lessons=lessons,
+        hard_stats=_hard_stats_safe(), max_unit_cost_jpy=_max_unit_cost_jpy_safe(),
     )
     # シグナル提出は構造化ツール経由 (スキーマ強制でフィールド欠落を根絶)
     captured: dict[str, Any] = {}
@@ -537,8 +659,16 @@ def run_trade_graph(
 
     log(f"  -> {len(signals)} 件のシグナル")
 
-    # Step 3.5: Counterargument gate (non-LLM — signal-quality check)
     rejected: list[dict[str, Any]] = []
+
+    # Step 3.45: 執行可能性フィルタ (非LLM) — 1単元コストが評価額上限を超える銘柄は
+    # 執行段階で必ず弾かれるため、反証ゲート (LLM) の前に落としてシグナル枠と
+    # ゲート呼び出しの浪費を防ぐ (例: 6367.T が毎サイクル無駄撃ちされていた)
+    if signals:
+        signals, unaffordable = _filter_affordable_signals(signals, log)
+        rejected = rejected + unaffordable
+
+    # Step 3.5: Counterargument gate (non-LLM — signal-quality check)
     if signals:
         log("\nStep 3.5: 反証ゲート検証...")
         # Map scenario to market_environment label used by validate_signals_batch
@@ -553,7 +683,7 @@ def run_trade_graph(
         if invalid_sigs:
             log(f"  -> {len(invalid_sigs)} 件却下、{len(valid_sigs)} 件通過")
         signals = valid_sigs
-        rejected = invalid_sigs
+        rejected = rejected + invalid_sigs
 
     # Step 3.55: ポートフォリオ単位の AI 推論 — セクター/テーマ過集中を抑制 (機械的上限に加える定性チェック)
     if signals:
@@ -575,9 +705,19 @@ def run_trade_graph(
     executed: list[dict[str, Any]] = []
     if signals:
         log(f"\nStep 4: 注文実行 ({len(signals)} 件)...")
-        executed = _execute_signals(signals, dry_run, log)
+        scen_exposure = (
+            scenarios_cfg.get("scenarios", {}).get(scenario, {}).get("max_exposure_pct")
+        )
+        executed = _execute_signals(
+            signals, dry_run, log,
+            exposure_cap_pct=float(scen_exposure) if scen_exposure else None,
+        )
     else:
         log("\nStep 4: 有効シグナルなし — 注文スキップ")
+
+    # シグナル追跡ログ (P5): 採用/却下/スキップの全結果を追記し、
+    # 「却下したシグナルはその後どうなったか」を仮想追跡できるようにする
+    _log_signal_outcomes(executed, rejected, scenario)
 
     # 総資産スナップショット (ベンチマーク比較用の時系列。失敗しても続行)
     record_equity_snapshot()
@@ -768,8 +908,13 @@ def _execute_signals(
     signals: list[dict[str, Any]],
     dry_run: bool,
     log: Any,
+    exposure_cap_pct: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Execute parsed trading signals."""
+    """Execute parsed trading signals.
+
+    exposure_cap_pct: シナリオ別の最大エクスポージャ (建玉評価額/総資産 の上限%)。
+    None なら制限なし。risk_off で買い進んでフルインベストになるのを防ぐ。
+    """
     executed: list[dict[str, Any]] = []
     if dry_run:
         for sig in signals:
@@ -830,6 +975,22 @@ def _execute_signals(
                 )
                 executed.append({"ticker": sig["ticker"], "status": "SKIPPED_CAP", "score": sig.get("score", 0)})
                 continue
+
+            # シナリオ別エクスポージャ上限 (risk_off で買い進みすぎない)
+            if exposure_cap_pct is not None and equity > 0:
+                cash_total_jpy = cash["JPY"] + cash["USD"] * USD_JPY_APPROX
+                positions_value = max(0.0, equity - cash_total_jpy)
+                est_jpy = est_cost if ccy == "JPY" else est_cost * USD_JPY_APPROX
+                new_exposure_pct = (positions_value + est_jpy) / equity * 100
+                if new_exposure_pct > exposure_cap_pct:
+                    log(
+                        f"  🌡️ {sig['ticker']}: 買い後エクスポージャ {new_exposure_pct:.0f}% が"
+                        f"シナリオ上限 {exposure_cap_pct:.0f}% 超 -> スキップ"
+                    )
+                    executed.append(
+                        {"ticker": sig["ticker"], "status": "SKIPPED_EXPOSURE", "score": sig.get("score", 0)}
+                    )
+                    continue
 
         # Buy — 成行注文（シミュレーターが指値PENDINGに非対応のため）
         buy_sig = {k: v for k, v in sig.items() if k != "sell_ticker"}

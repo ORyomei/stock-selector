@@ -61,6 +61,31 @@ def _days_to_earnings(ticker: str) -> int | None:
     return _earnings_days_from(dates, date.today())
 
 
+def _entry_thesis(ticker: str) -> dict[str, Any] | None:
+    """エントリー時のシグナル (thesis) を diary/signals から読む。
+
+    fail_conditions / invalidation_conditions / exit_plan を手仕舞い判断の
+    基準として渡す。ファイルはティッカー毎に上書きされるため「そのティッカーの
+    直近のエントリー判断」を表す。無い/壊れている場合は None (thesis なしで判断)。
+    """
+    import json
+
+    from infra.container import DIARY_DIR
+
+    path = DIARY_DIR / "signals" / f"{ticker.replace('.', '')}_auto.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    thesis = {
+        "reason": str(data.get("reason", ""))[:200],
+        "fail_conditions": data.get("fail_conditions") or [],
+        "invalidation_conditions": data.get("invalidation_conditions") or [],
+        "exit_plan": str(data.get("exit_plan", ""))[:200],
+    }
+    return thesis if any(thesis.values()) else None
+
+
 def _position_context(pos: Any) -> dict[str, Any]:
     """1ポジションの判断材料を集める (建玉facts + テクニカル + センチメント)。"""
     from datetime import UTC, datetime
@@ -119,6 +144,11 @@ def _position_context(pos: Any) -> dict[str, Any]:
     if days_to_earn is not None:
         ctx["days_to_earnings"] = days_to_earn
 
+    # エントリー時の thesis (fail/invalidation 条件と exit 計画)
+    thesis = _safe(_entry_thesis, ticker)
+    if thesis:
+        ctx["entry_thesis"] = thesis
+
     return ctx
 
 
@@ -135,6 +165,11 @@ def _build_prompt(contexts: list[dict[str, Any]], scenario: str) -> str:
         "判断基準の例: 投資テーゼの崩壊、テクニカルの明確な悪化 (売り転換)、強い悪材料、\n"
         "高値から大きく押し戻されている、強い抵抗線でモメンタム喪失、"
         "**決算が間近 (days_to_earnings が小さい) で決算ギャンブルを避けたい** など。\n"
+        "**entry_thesis がある場合はそれを判断基準とすること**: exit / trim を選ぶなら、\n"
+        "fail_conditions / invalidation_conditions のどれが発動したか (または thesis 外の\n"
+        "新たな悪材料か) を reason に明記する。thesis の条件が一つも崩れておらず\n"
+        "新たな悪材料もなければ**原則 hold** (含み損だけを理由に手仕舞わない。\n"
+        "下方リスクは機械ストップが守っている)。\n"
         "**デフォルトは hold** とし、明確な根拠がある時だけ exit / trim を選んでください。\n"
         "（あなたは機械ストップを止めることはできません。より早い手仕舞いの助言のみ可能です。）\n\n"
         "次の JSON のみを出力してください:\n"

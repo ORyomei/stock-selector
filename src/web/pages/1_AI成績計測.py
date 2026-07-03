@@ -120,6 +120,32 @@ try:
     except Exception as e:
         st.error(f"期間A/B取得エラー: {e}")
 
+    # ── シグナル仮想追跡 (採用 vs 却下の N日後リターン) ──
+    st.subheader("🔭 シグナル仮想追跡（採用 vs 却下）")
+    st.caption(
+        "全シグナル（約定・却下・スキップ）を記録し、シグナル日以降の株価を仮想追跡。"
+        "「反証ゲートや上限で却下したシグナルはその後上がったのか」= ゲートが"
+        "良いシグナルを殺していないかを検証します（2026-07-04 以降のシグナルから記録）。"
+    )
+    try:
+        ft = dd.signal_followthrough(days=30)
+        if not ft["summary"]:
+            st.caption("※ シグナル結果ログはまだ蓄積中です。サイクルが回ると貯まります。")
+        else:
+            frows = []
+            for grp, hs in ft["summary"].items():
+                row: dict[str, object] = {"グループ": grp}
+                for hkey, s in hs.items():
+                    row[f"{hkey} 平均%"] = s["avg_pct"]
+                    row[f"{hkey} 勝率%"] = s["hit_rate"]
+                    row["件数"] = s["count"]
+                frows.append(row)
+            st.dataframe(frows, width="stretch", hide_index=True)
+            with st.expander("個別シグナル (直近50件)"):
+                st.dataframe(ft["rows"], width="stretch", hide_index=True)
+    except Exception as e:
+        st.error(f"シグナル追跡取得エラー: {e}")
+
     # ── ソース詳細 ──
     with st.expander("ソース詳細（細分）"):
         det = [

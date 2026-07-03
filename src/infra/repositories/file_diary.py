@@ -73,3 +73,28 @@ class FileDiaryRepository(DiaryRepository):
                 with open(p) as f:
                     results.append(json.load(f))
         return results
+
+    def append_signal_log(self, record: dict[str, Any]) -> None:
+        """シグナル結果を diary/signals_log.jsonl に追記する (仮想追跡用)。"""
+        self._diary_dir.mkdir(parents=True, exist_ok=True)
+        path = self._diary_dir / "signals_log.jsonl"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def load_signal_log(self, days: int = 60) -> list[dict[str, Any]]:
+        path = self._diary_dir / "signals_log.jsonl"
+        if not path.exists():
+            return []
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        records: list[dict[str, Any]] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(rec.get("ts", "")) >= cutoff:
+                records.append(rec)
+        return records

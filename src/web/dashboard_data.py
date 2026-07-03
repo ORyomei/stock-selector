@@ -188,19 +188,7 @@ def _to_jst_x(ts: str, date: str) -> str:
         return f"{date} 00:00:00"
 
 
-def _close_reason_bucket(reason: str) -> str:
-    r = reason.lower()
-    if "stop_loss" in r or "損切" in reason:
-        return "stop_loss"
-    if "take_profit" in r or "利確" in reason:
-        return "take_profit"
-    if "trailing" in r:
-        return "trailing"
-    if "max_hold" in r or "hold_timeout" in r:
-        return "max_hold"
-    if "manual" in r:
-        return "manual/ai_exit"
-    return "other"
+from core.trade_stats import close_reason_bucket as _close_reason_bucket  # noqa: E402
 
 
 def performance(days: int = 90) -> dict[str, Any]:
@@ -318,91 +306,115 @@ def equity_history(limit: int = 2000) -> list[dict[str, Any]]:
     return records[-limit:]
 
 
-def _hold_bucket(t: dict[str, Any]) -> str:
-    hd = t.get("hold_days")
-    if not isinstance(hd, int | float):
-        return "不明"
-    if hd <= 0:
-        return "当日"
-    if hd <= 3:
-        return "1-3日"
-    if hd <= 10:
-        return "4-10日"
-    return "11日+"
+# ── signal follow-through (P5: シグナル仮想追跡) ─────────────────
 
 
-def _score_bucket(t: dict[str, Any]) -> str:
-    s = t.get("entry_score")
-    if not isinstance(s, int | float):
-        return "不明"
-    if s < 25:
-        return "score<25"
-    if s <= 40:
-        return "score25-40"
-    return "score>40"
+def _forward_returns(
+    closes: list[tuple[str, float]], signal_date: str, horizons: tuple[int, ...]
+) -> dict[int, float]:
+    """signal_date 以降の最初の終値を基準に +N営業日リターン% を返す (純関数)。
+
+    closes は (YYYY-MM-DD, close) の昇順リスト。基準日やホライズン先の
+    データが無い場合はそのキーを省く。
+    """
+    idx = next((i for i, (d, _) in enumerate(closes) if d >= signal_date), None)
+    if idx is None:
+        return {}
+    base = closes[idx][1]
+    out: dict[int, float] = {}
+    for h in horizons:
+        j = idx + h
+        if j < len(closes) and base:
+            out[h] = round((closes[j][1] / base - 1) * 100, 2)
+    return out
 
 
-def _join_entry_meta(
-    closes: list[dict[str, Any]], entries: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """各クローズに、同一ティッカーの直近先行エントリーの score/confidence を付与 (純関数)。"""
-    ents = sorted(entries, key=lambda e: str(e.get("timestamp", "")))
-    joined: list[dict[str, Any]] = []
-    for c in closes:
-        cts = str(c.get("timestamp", ""))
-        best = None
-        for e in ents:
-            if e.get("ticker") == c.get("ticker") and str(e.get("timestamp", "")) <= cts:
-                best = e  # ents は昇順なので最後にマッチしたものが直近
-        d = dict(c)
-        if best is not None:
-            d["entry_score"] = best.get("score")
-            d["entry_confidence"] = best.get("confidence")
-        joined.append(d)
-    return joined
+def _ticker_closes(ticker: str, days: int, ttl_sec: int = 900) -> list[tuple[str, float]]:
+    """ticker の日次終値列 (TTL キャッシュ付き)。"""
+    import time
+
+    key = f"closes:{ticker}:{days}"
+    hit = _bench_cache.get(key)
+    if hit and time.time() - hit[0] < ttl_sec:
+        return hit[1]
+    import yfinance as yf
+
+    hist = yf.Ticker(ticker).history(period=f"{days + 30}d")["Close"].dropna()
+    closes = [(idx.strftime("%Y-%m-%d"), float(v)) for idx, v in hist.items()]
+    _bench_cache[key] = (time.time(), closes)
+    return closes
 
 
-def _bucket_stats(
-    items: list[dict[str, Any]], key_fn: Any
-) -> dict[str, dict[str, Any]]:
-    """バケット別の件数・勝率・合計/平均損益 (純関数)。"""
-    buckets: dict[str, dict[str, float]] = {}
-    for t in items:
-        pnl = t.get("pnl")
-        if not isinstance(pnl, int | float):
+def _signal_group(status: str) -> str:
+    if status == "FILLED":
+        return "採用(約定)"
+    if status.startswith("REJECTED"):
+        return "却下(ゲート/上限)"
+    return "スキップ/失敗"
+
+
+def signal_followthrough(
+    days: int = 30, horizons: tuple[int, ...] = (1, 5, 10)
+) -> dict[str, Any]:
+    """シグナル結果ログの仮想追跡: 採用/却下それぞれの N日後リターンを集計。
+
+    「反証ゲートや上限で却下したシグナルはその後上がったのか」を検証し、
+    ゲートが良いシグナルを殺していないかを測る。
+    """
+    recs = get_container().diary().load_signal_log(days=days)
+    rows: list[dict[str, Any]] = []
+    for r in recs:
+        ticker = r.get("ticker")
+        ts = str(r.get("ts", ""))
+        if not ticker or len(ts) < 10:
             continue
-        b = key_fn(t)
-        d = buckets.setdefault(b, {"count": 0, "wins": 0, "total": 0.0})
-        d["count"] += 1
-        d["wins"] += 1 if pnl > 0 else 0
-        d["total"] += float(pnl)
-    return {
-        b: {
-            "count": int(d["count"]),
-            "win_rate": round(d["wins"] / d["count"] * 100, 1),
-            "total_pnl": round(d["total"]),
-            "avg_pnl": round(d["total"] / d["count"]),
-        }
-        for b, d in buckets.items()
-        if d["count"]
-    }
+        sig_date = _to_jst_x(ts, ts[:10])[:10]
+        try:
+            closes = _ticker_closes(str(ticker), days)
+        except Exception:
+            continue
+        fwd = _forward_returns(closes, sig_date, horizons)
+        rows.append({
+            "group": _signal_group(str(r.get("status", ""))),
+            "ticker": ticker,
+            "date": sig_date,
+            "status": r.get("status"),
+            "score": r.get("score"),
+            **{f"r{h}": fwd.get(h) for h in horizons},
+        })
+
+    # グループ×ホライズン別に平均リターン・勝率を集計
+    agg: dict[str, dict[str, list[float]]] = {}
+    for row in rows:
+        cols = agg.setdefault(row["group"], {f"r{h}": [] for h in horizons})
+        for h in horizons:
+            v = row.get(f"r{h}")
+            if isinstance(v, int | float):
+                cols[f"r{h}"].append(float(v))
+    summary: dict[str, dict[str, Any]] = {}
+    for g, cols in agg.items():
+        summary[g] = {}
+        for h in horizons:
+            vals = cols[f"r{h}"]
+            if vals:
+                summary[g][f"+{h}d"] = {
+                    "count": len(vals),
+                    "avg_pct": round(sum(vals) / len(vals), 2),
+                    "hit_rate": round(sum(1 for v in vals if v > 0) / len(vals) * 100, 1),
+                }
+    return {"summary": summary, "rows": rows[-50:], "n_records": len(recs)}
 
 
-def expectancy(days: int = 120) -> dict[str, Any]:
-    """保有期間別・エントリースコア別の実測期待値 (diary/trades から集計)。"""
-    trades = get_container().diary().load_recent_trades(days=days)
-    closes = [
-        t
-        for t in trades
-        if str(t.get("action", "")).upper() in ("CLOSE", "SELL")
-        and isinstance(t.get("pnl"), int | float)
-    ]
-    entries = [t for t in trades if str(t.get("action", "")).upper() == "BUY"]
-    return {
-        "by_hold": _bucket_stats(closes, _hold_bucket),
-        "by_score": _bucket_stats(_join_entry_meta(closes, entries), _score_bucket),
-        "n_closes": len(closes),
-    }
+# バケット集計は core/trade_stats に集約 (プロンプト注入と共有)。
+# 既存テスト・呼び出し互換のため旧名で re-export する (import-as だと
+# ruff の未使用 import 除去に消されるため、明示的な代入にしている)。
+from core import trade_stats as _trade_stats  # noqa: E402
+
+expectancy = _trade_stats.expectancy
+_bucket_stats = _trade_stats.bucket_stats
+_hold_bucket = _trade_stats.hold_bucket
+_join_entry_meta = _trade_stats.join_entry_meta
+_score_bucket = _trade_stats.score_bucket
 
 
 def _source_category(src: str) -> str:
