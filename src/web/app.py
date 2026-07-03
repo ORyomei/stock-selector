@@ -124,7 +124,7 @@ try:
                         "showSymbol": True,
                         "smooth": False,
                         "areaStyle": {"opacity": 0.12},
-                        "data": [[c["date"], c["cum_pnl"]] for c in curve],
+                        "data": [[c.get("x", c["date"]), c["cum_pnl"]] for c in curve],
                     }
                 ],
             }

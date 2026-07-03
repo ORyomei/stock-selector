@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -169,6 +170,23 @@ def portfolio_overview() -> dict[str, Any]:
 
 # ── performance ──────────────────────────────────────────────────
 
+_JST = timezone(timedelta(hours=9))
+
+
+def _to_jst_x(ts: str, date: str) -> str:
+    """UTC ISO タイムスタンプを JST の壁時計文字列に変換する (ECharts time 軸用)。
+
+    時刻情報が無い/パース不能なら日付の 00:00 にフォールバック。ECharts の
+    ``type:"time"`` は "YYYY-MM-DD HH:MM:SS" をローカル時刻として解釈する。
+    """
+    try:
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(_JST).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return f"{date} 00:00:00"
+
 
 def _close_reason_bucket(reason: str) -> str:
     r = reason.lower()
@@ -191,12 +209,13 @@ def performance(days: int = 90) -> dict[str, Any]:
     closed = _recent_closed_trades(days=days)
     stats = _aggregate(closed)
 
-    # エクイティカーブ (実現損益の累積、古い順)
-    asc = sorted(closed, key=lambda c: c["date"])
+    # エクイティカーブ (実現損益の累積、古い順)。x はフルタイムスタンプ(JST)を使い、
+    # 同じ日の複数約定が 0時に重ならないようにする。
+    asc = sorted(closed, key=lambda c: c.get("ts") or c["date"])
     curve, cum = [], 0.0
     for c in asc:
         cum += c["pnl"]
-        curve.append({"date": c["date"], "cum_pnl": round(cum, 0)})
+        curve.append({"date": c["date"], "x": _to_jst_x(c.get("ts", ""), c["date"]), "cum_pnl": round(cum, 0)})
 
     # クローズ理由別
     by_reason: dict[str, dict[str, float]] = {}

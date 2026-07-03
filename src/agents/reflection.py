@@ -36,13 +36,15 @@ def _recent_closed_trades(days: int = 30) -> list[dict[str, Any]]:
         pnl = t.get("pnl")
         if not isinstance(pnl, int | float):
             continue
+        ts = str(t.get("timestamp", ""))
         closed.append({
             "ticker": t.get("ticker", "?"),
             "pnl": round(float(pnl), 0),
             "reason": str(t.get("reason", ""))[:60],
-            "date": str(t.get("timestamp", ""))[:10],
+            "date": ts[:10],
+            "ts": ts,  # フル ISO タイムスタンプ (エクイティカーブの時刻軸用)
         })
-    closed.sort(key=lambda c: c["date"], reverse=True)
+    closed.sort(key=lambda c: c["ts"] or c["date"], reverse=True)
     return closed
 
 

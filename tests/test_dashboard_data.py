@@ -15,6 +15,24 @@ def test_value_jpy_currency_conversion():
     assert dd._value_jpy("AAPL", 100.0, 10) == 100.0 * 10 * dd.USD_JPY  # 米国株は換算
 
 
+def test_to_jst_x_converts_utc_to_jst():
+    # 09:00 JST の約定 = 00:00 UTC。日付だけでなく時刻が保持される
+    assert dd._to_jst_x("2026-07-03T00:00:00+00:00", "2026-07-03") == "2026-07-03 09:00:00"
+    # 12:59 JST = 03:59 UTC
+    assert dd._to_jst_x("2026-07-03T03:59:00+00:00", "2026-07-03") == "2026-07-03 12:59:00"
+
+
+def test_to_jst_x_assumes_utc_when_naive():
+    # tz 無しは UTC とみなす
+    assert dd._to_jst_x("2026-07-03T03:00:00", "2026-07-03") == "2026-07-03 12:00:00"
+
+
+def test_to_jst_x_falls_back_on_bad_timestamp():
+    # パース不能/空 → 日付の 00:00 にフォールバック (0時に落ちるが例外は出さない)
+    assert dd._to_jst_x("", "2026-07-03") == "2026-07-03 00:00:00"
+    assert dd._to_jst_x("garbage", "2026-06-01") == "2026-06-01 00:00:00"
+
+
 def test_etf_name_override():
     """既知ETFは yfinance を呼ばず固定のファンド名を返す。"""
     assert dd._resolve_name("2559.T") == "MAXIS 全世界株式 (オルカン/ACWI)"
