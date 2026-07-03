@@ -285,8 +285,10 @@ def _run_ai_exit_advisor(
                 continue
             out, rc = run_trade_cmd(["--close", ticker, str(qty), "--source", f"ai_{a['action']}"])
             ok = rc == 0 and '"status": "FILLED"' in out
-            log(f"  {'✅' if ok else '❌'} AI{a['action']}: {ticker} {qty}株 "
-                f"({'約定' if ok else '失敗'}) — {a['reason']}")
+            if ok:
+                log(f"  ✅ AI{a['action']}: {ticker} {qty}株 (約定) — {a['reason']}")
+            else:
+                log(f"  ❌ AI{a['action']}: {ticker} {qty}株 (失敗 rc={rc}: {_result_reason(out)}) — {a['reason']}")
     except Exception as e:
         log(f"  ⚠️ AI手仕舞いステップでエラー (機械ストップは適用済み): {e}")
 
@@ -719,6 +721,27 @@ def _apply_counterargument_gate(
         return list(signals), [], details
 
 
+def _result_reason(out: str) -> str:
+    """run_trade_cmd の出力から失敗理由を取り出す。
+
+    cmd_execute_signal / cmd_close_position は末尾に ```json {result} ``` を
+    出力しており、その ``reason``/``status`` を拾う。JSON が見つからない場合は
+    出力末尾を短く返す(理由が完全に消えないためのフォールバック)。
+    """
+    try:
+        start = out.rindex("{")
+        end = out.rindex("}")
+        if start < end:
+            data = json.loads(out[start : end + 1])
+            reason = data.get("reason") or data.get("status")
+            if reason:
+                return str(reason)
+    except (ValueError, json.JSONDecodeError):
+        pass
+    tail = out.strip().splitlines()[-1:] if out.strip() else []
+    return tail[0][:200] if tail else "理由不明 (出力なし)"
+
+
 def _execute_signals(
     signals: list[dict[str, Any]],
     dry_run: bool,
@@ -744,7 +767,10 @@ def _execute_signals(
                 log(f"  売り: {sell_ticker} {qty}株...")
                 out, rc = run_trade_cmd(["--close", sell_ticker, str(qty), "--source", "swap"])
                 ok = rc == 0 and '"status": "FILLED"' in out
-                log(f"    {'✅' if ok else '❌'} {sell_ticker} {'クローズ完了' if ok else 'クローズ失敗'}")
+                if ok:
+                    log(f"    ✅ {sell_ticker} クローズ完了")
+                else:
+                    log(f"    ❌ {sell_ticker} クローズ失敗 (rc={rc}): {_result_reason(out)}")
                 if not ok:
                     executed.append({"ticker": sell_ticker, "status": "SELL_FAILED", "score": 0})
                     continue
@@ -790,7 +816,10 @@ def _execute_signals(
         sig_path = diary.save_signal(sig_name, buy_sig)
         out, rc = run_trade_cmd(["--from-signal", sig_path])
         ok = rc == 0 and '"status": "FILLED"' in out
-        log(f"  {'✅' if ok else '❌'} {sig['ticker']} {'約定成功' if ok else '約定失敗'}")
+        if ok:
+            log(f"  ✅ {sig['ticker']} 約定成功")
+        else:
+            log(f"  ❌ {sig['ticker']} 約定失敗 (rc={rc}): {_result_reason(out)}")
         executed.append(
             {"ticker": sig["ticker"], "status": "FILLED" if ok else "FAILED", "score": sig.get("score", 0)}
         )
