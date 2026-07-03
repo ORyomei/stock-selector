@@ -18,7 +18,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from infra.container import DIARY_DIR, get_container
+from infra.container import DIARY_DIR, PROJECT_DIR, get_container
 
 USD_JPY = 150.0  # 概算換算 (表示用)
 LOCK_FILE = SRC_DIR.parent / ".auto_trade.lock"
@@ -230,6 +230,178 @@ def performance(days: int = 90) -> dict[str, Any]:
         "equity_curve": curve,
         "by_reason": {k: {"count": int(v["count"]), "pnl": round(v["pnl"], 0)} for k, v in by_reason.items()},
         "recent_closed": closed[:20],
+    }
+
+
+# ── benchmark & expectancy (P2: 計測基盤) ────────────────────────
+
+_bench_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _price_change_pct(ticker: str, days: int, ttl_sec: int = 900) -> float | None:
+    """ticker の直近 days 日の騰落率% (yfinance)。TTL キャッシュ付き。"""
+    import time
+
+    key = f"{ticker}:{days}"
+    hit = _bench_cache.get(key)
+    if hit and time.time() - hit[0] < ttl_sec:
+        return hit[1]
+    import yfinance as yf
+
+    closes = yf.Ticker(ticker).history(period=f"{days}d")["Close"].dropna()
+    val = float((closes.iloc[-1] / closes.iloc[0] - 1) * 100) if len(closes) >= 2 else None
+    _bench_cache[key] = (time.time(), val)
+    return val
+
+
+def _initial_capital_jpy() -> float:
+    try:
+        cfg = get_container().config_repo().load_trading_config()
+        return float(cfg.get("simulator", {}).get("initial_capital_jpy", 0)) or 3_000_000
+    except Exception:
+        return 3_000_000
+
+
+def benchmark(days: int = 90) -> dict[str, Any]:
+    """TOPIX (1306.T) と実現損益ベースリターンの比較 (アルファ計測)。
+
+    system_pct は「期間内実現損益 ÷ 初期資金」— 含み損益は含まない点に注意。
+    """
+    out: dict[str, Any] = {
+        "window_days": days,
+        "topix_pct": None,
+        "system_pct": None,
+        "alpha_pct": None,
+        "realized_jpy": None,
+    }
+    try:
+        from agents.reflection import _recent_closed_trades
+
+        realized = sum(c["pnl"] for c in _recent_closed_trades(days=days))
+        out["realized_jpy"] = round(realized)
+        out["system_pct"] = round(realized / _initial_capital_jpy() * 100, 2)
+    except Exception:
+        pass
+    try:
+        topix = _price_change_pct("1306.T", days)
+        out["topix_pct"] = round(topix, 2) if topix is not None else None
+    except Exception:
+        pass
+    if out["topix_pct"] is not None and out["system_pct"] is not None:
+        out["alpha_pct"] = round(out["system_pct"] - out["topix_pct"], 2)
+    return out
+
+
+def equity_history(limit: int = 2000) -> list[dict[str, Any]]:
+    """デーモンが蓄積する総資産スナップショット (logs/equity_history.jsonl)。"""
+    path = PROJECT_DIR / "logs" / "equity_history.jsonl"
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec.get("equity_jpy"), int | float) and rec.get("ts"):
+                    records.append({
+                        "x": _to_jst_x(str(rec["ts"]), str(rec["ts"])[:10]),
+                        "equity_jpy": rec["equity_jpy"],
+                    })
+    except OSError:
+        return []
+    return records[-limit:]
+
+
+def _hold_bucket(t: dict[str, Any]) -> str:
+    hd = t.get("hold_days")
+    if not isinstance(hd, int | float):
+        return "不明"
+    if hd <= 0:
+        return "当日"
+    if hd <= 3:
+        return "1-3日"
+    if hd <= 10:
+        return "4-10日"
+    return "11日+"
+
+
+def _score_bucket(t: dict[str, Any]) -> str:
+    s = t.get("entry_score")
+    if not isinstance(s, int | float):
+        return "不明"
+    if s < 25:
+        return "score<25"
+    if s <= 40:
+        return "score25-40"
+    return "score>40"
+
+
+def _join_entry_meta(
+    closes: list[dict[str, Any]], entries: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """各クローズに、同一ティッカーの直近先行エントリーの score/confidence を付与 (純関数)。"""
+    ents = sorted(entries, key=lambda e: str(e.get("timestamp", "")))
+    joined: list[dict[str, Any]] = []
+    for c in closes:
+        cts = str(c.get("timestamp", ""))
+        best = None
+        for e in ents:
+            if e.get("ticker") == c.get("ticker") and str(e.get("timestamp", "")) <= cts:
+                best = e  # ents は昇順なので最後にマッチしたものが直近
+        d = dict(c)
+        if best is not None:
+            d["entry_score"] = best.get("score")
+            d["entry_confidence"] = best.get("confidence")
+        joined.append(d)
+    return joined
+
+
+def _bucket_stats(
+    items: list[dict[str, Any]], key_fn: Any
+) -> dict[str, dict[str, Any]]:
+    """バケット別の件数・勝率・合計/平均損益 (純関数)。"""
+    buckets: dict[str, dict[str, float]] = {}
+    for t in items:
+        pnl = t.get("pnl")
+        if not isinstance(pnl, int | float):
+            continue
+        b = key_fn(t)
+        d = buckets.setdefault(b, {"count": 0, "wins": 0, "total": 0.0})
+        d["count"] += 1
+        d["wins"] += 1 if pnl > 0 else 0
+        d["total"] += float(pnl)
+    return {
+        b: {
+            "count": int(d["count"]),
+            "win_rate": round(d["wins"] / d["count"] * 100, 1),
+            "total_pnl": round(d["total"]),
+            "avg_pnl": round(d["total"] / d["count"]),
+        }
+        for b, d in buckets.items()
+        if d["count"]
+    }
+
+
+def expectancy(days: int = 120) -> dict[str, Any]:
+    """保有期間別・エントリースコア別の実測期待値 (diary/trades から集計)。"""
+    trades = get_container().diary().load_recent_trades(days=days)
+    closes = [
+        t
+        for t in trades
+        if str(t.get("action", "")).upper() in ("CLOSE", "SELL")
+        and isinstance(t.get("pnl"), int | float)
+    ]
+    entries = [t for t in trades if str(t.get("action", "")).upper() == "BUY"]
+    return {
+        "by_hold": _bucket_stats(closes, _hold_bucket),
+        "by_score": _bucket_stats(_join_entry_meta(closes, entries), _score_bucket),
+        "n_closes": len(closes),
     }
 
 

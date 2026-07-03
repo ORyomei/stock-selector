@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from domain.models import OrderSide, OrderType, Position
 from interfaces.broker import BrokerInterface
 
 from .order_manager import OrderManager, TradeAction, TradingSignal
@@ -166,6 +167,28 @@ class TradeExecutor:
                 )
 
                 if should_close:
+                    # 保有期間メタデータ (期待値のバケット別計測用)
+                    entry_iso = position.entry_time.isoformat() if position.entry_time else None
+                    hold_days = (
+                        (datetime.now(UTC) - position.entry_time).days
+                        if position.entry_time
+                        else None
+                    )
+
+                    # 利確到達時は半分だけ利確し、残りをトレーリングで走らせる (損小利大)。
+                    # 残りが次サイクルでも利確水準以上なら再び半分…と段階的に売り上がる。
+                    # 単元で半分に割れない小口は従来どおり全量利確。
+                    if reason == "take_profit":
+                        partial_qty = self._scale_out_quantity(position)
+                        if partial_qty > 0:
+                            result = self._close_partial(
+                                position, partial_qty, "take_profit_scale_out"
+                            )
+                            result["entry_time"] = entry_iso
+                            result["hold_days"] = hold_days
+                            results.append(result)
+                            continue
+
                     signal = TradingSignal(
                         ticker=position.ticker,
                         action=TradeAction.CLOSE,
@@ -189,6 +212,8 @@ class TradeExecutor:
                             "timestamp": result["timestamp"],
                             "fill_price": result["fill_price"],
                             "pnl": result["pnl"],
+                            "entry_time": entry_iso,
+                            "hold_days": hold_days,
                         }
                     )
 
@@ -206,6 +231,57 @@ class TradeExecutor:
             )
 
         return results
+
+    @staticmethod
+    def _scale_out_quantity(position: Position) -> int:
+        """利確到達時に部分利確する株数 (半分を売買単位に丸め)。
+
+        半分・残りの両方が 1 単元以上確保できない場合は 0 を返し、
+        呼び出し側は従来どおり全量クローズにフォールバックする。
+        """
+        from core.trading_units import get_trading_unit
+
+        unit = max(1, get_trading_unit(position.ticker))
+        half = (position.quantity // 2 // unit) * unit
+        if half >= unit and (position.quantity - half) >= unit:
+            return half
+        return 0
+
+    def _close_partial(self, position: Position, quantity: int, reason: str) -> dict:
+        """建玉の一部を成行で売却する (利確の段階売り用)。"""
+        try:
+            order = self.broker.place_order(
+                ticker=position.ticker,
+                side=OrderSide.SELL,
+                quantity=quantity,
+                order_type=OrderType.MARKET,
+                entry_price=0.0,
+            )
+            success = order.status.value == "FILLED"
+            pnl = (
+                round((order.fill_price - position.entry_price) * quantity, 2)
+                if success and order.fill_price is not None
+                else None
+            )
+            return {
+                "success": success,
+                "ticker": position.ticker,
+                "quantity": quantity,
+                "reason": reason,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "fill_price": order.fill_price,
+                "pnl": pnl,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "ticker": position.ticker,
+                "quantity": quantity,
+                "reason": f"{reason}_failed: {e}",
+                "timestamp": datetime.now(UTC).isoformat(),
+                "fill_price": None,
+                "pnl": None,
+            }
 
     @staticmethod
     def _determine_close_reason(position) -> str:

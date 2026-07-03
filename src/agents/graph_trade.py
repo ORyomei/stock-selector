@@ -25,6 +25,7 @@ from agents.portfolio_helpers import (
     get_held_positions,
     get_held_tickers,
     get_max_positions,
+    record_equity_snapshot,
     warn_overweight_positions,
 )
 from agents.runner import run_trade_cmd
@@ -262,8 +263,26 @@ def _run_ai_exit_advisor(
         if not positions:
             log("  -> 保有なし")
             return
-        by_ticker = {p.ticker: p for p in positions}
-        actions = advise_exits(positions, scenario, provider=provider, model=model, log=log)
+
+        # 最小保有期間ゲート: 建てた直後の AI 手仕舞いは早刈り (勝ちを伸ばせない +
+        # 同日回転のコスト) になりやすい。min_hold 暦日未満は助言対象から外す。
+        # 下方リスクは機械ストップ (損切り/max_loss) が引き続き守る。
+        from agents.portfolio_helpers import held_calendar_days
+        from core.trade import load_config
+
+        min_hold = int(load_config().get("ai_exit_min_hold_days", 1))
+        eligible = [p for p in positions if held_calendar_days(p.entry_time) >= min_hold]
+        if len(eligible) < len(positions):
+            log(
+                f"  -> {len(positions) - len(eligible)} 件は保有 {min_hold} 暦日未満のため"
+                "対象外 (機械ストップのみ)"
+            )
+        if not eligible:
+            log("  -> 対象なし (全て最小保有期間内)")
+            return
+
+        by_ticker = {p.ticker: p for p in eligible}
+        actions = advise_exits(eligible, scenario, provider=provider, model=model, log=log)
 
         for a in actions:
             ticker = a["ticker"]
@@ -559,6 +578,9 @@ def run_trade_graph(
         executed = _execute_signals(signals, dry_run, log)
     else:
         log("\nStep 4: 有効シグナルなし — 注文スキップ")
+
+    # 総資産スナップショット (ベンチマーク比較用の時系列。失敗しても続行)
+    record_equity_snapshot()
 
     # Save log
     log(f"\n{'=' * 60}")

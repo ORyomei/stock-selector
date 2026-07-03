@@ -167,6 +167,10 @@ def cmd_execute_signal(config: dict, risk_limits: dict, signal: TradingSignal) -
     # 実行 (ブローカーが内部で自己永続化する)
     result = executor.execute_signal(signal)
     result["source"] = "ai_entry"  # ReAct エージェント由来のエントリー
+    # エントリー時のシグナルメタデータ (スコア帯/confidence帯別の期待値計測用)
+    result["score"] = signal.score
+    result["confidence"] = signal.confidence
+    result["timespan"] = signal.timespan.value
 
     # 結果保存
     saved_path = save_trade_result(result)
@@ -245,6 +249,9 @@ def cmd_check_and_close_positions(config: dict, risk_limits: dict) -> int:
                     "source": f"mech:{result.get('reason', '?')}",
                     "reason": f"Auto-close: {result.get('reason', '?')}",
                     "timestamp": result.get("timestamp"),
+                    # 保有期間メタデータ (期待値のバケット別計測用)
+                    "entry_time": result.get("entry_time"),
+                    "hold_days": result.get("hold_days"),
                 })
 
         print(f"\n```json\n{json.dumps(results, ensure_ascii=False, indent=2)}\n```")
@@ -312,6 +319,9 @@ def cmd_close_position(config: dict, ticker: str, quantity: int, source: str = "
         "source": source,
         "reason": f"{source}: {quantity} shares",
         "timestamp": datetime.now(UTC).isoformat(),
+        # 保有期間メタデータ (期待値のバケット別計測用)
+        "entry_time": target.entry_time.isoformat() if target.entry_time else None,
+        "hold_days": (datetime.now(UTC) - target.entry_time).days if target.entry_time else None,
     }
 
     saved_path = save_trade_result(result)

@@ -145,6 +145,90 @@ except Exception as e:
 
 st.divider()
 
+# ── ベンチマーク・期待値 ─────────────────────────────────────────
+st.subheader("📐 ベンチマーク・期待値")
+try:
+    bm = dd.benchmark(days=90)
+    m1, m2, m3 = st.columns(3)
+    m1.metric(
+        "TOPIX (1306.T, 90日)",
+        f"{bm['topix_pct']:+.1f}%" if bm["topix_pct"] is not None else "—",
+    )
+    m2.metric(
+        "実現損益リターン (90日)",
+        f"{bm['system_pct']:+.2f}%" if bm["system_pct"] is not None else "—",
+        help="期間内の実現損益 ÷ 初期資金。含み損益は含まない",
+    )
+    m3.metric(
+        "アルファ (対TOPIX)",
+        f"{bm['alpha_pct']:+.1f}%" if bm["alpha_pct"] is not None else "—",
+        delta=f"{bm['alpha_pct']:+.1f}%" if bm["alpha_pct"] is not None else None,
+    )
+
+    # 総資産の時系列 (サイクル毎スナップショット、蓄積後に表示)
+    hist = dd.equity_history()
+    if len(hist) >= 2:
+        from streamlit_echarts import st_echarts as _st_echarts
+
+        _st_echarts(
+            options={
+                "tooltip": {"trigger": "axis"},
+                "grid": {"left": 80, "right": 24, "top": 24, "bottom": 56},
+                "xAxis": {"type": "time"},
+                "yAxis": {"type": "value", "name": "総資産(¥)", "scale": True},
+                "dataZoom": [
+                    {"type": "inside", "filterMode": "filter"},
+                    {"type": "slider", "filterMode": "filter", "height": 20, "bottom": 8},
+                ],
+                "series": [
+                    {
+                        "name": "総資産",
+                        "type": "line",
+                        "showSymbol": False,
+                        "areaStyle": {"opacity": 0.1},
+                        "data": [[h["x"], h["equity_jpy"]] for h in hist],
+                    }
+                ],
+            },
+            height="240px",
+        )
+    else:
+        st.caption("総資産の時系列はサイクル毎に蓄積中 (データが貯まると表示されます)")
+
+    exp = dd.expectancy(days=120)
+    eL, eR = st.columns(2)
+    with eL:
+        st.caption("保有期間別 期待値 (120日)")
+        if exp["by_hold"]:
+            st.dataframe(
+                [
+                    {"保有": k, "件数": v["count"], "勝率%": v["win_rate"],
+                     "合計¥": f"{v['total_pnl']:+,}", "平均¥": f"{v['avg_pnl']:+,}"}
+                    for k, v in exp["by_hold"].items()
+                ],
+                width="stretch", hide_index=True,
+            )
+        else:
+            st.caption("(データなし)")
+    with eR:
+        st.caption("エントリースコア別 期待値 (120日)")
+        if exp["by_score"]:
+            st.dataframe(
+                [
+                    {"スコア帯": k, "件数": v["count"], "勝率%": v["win_rate"],
+                     "合計¥": f"{v['total_pnl']:+,}", "平均¥": f"{v['avg_pnl']:+,}"}
+                    for k, v in exp["by_score"].items()
+                ],
+                width="stretch", hide_index=True,
+            )
+        else:
+            st.caption("(データなし)")
+    st.caption("hold_days / score は 2026-07-04 以降の約定から記録 (それ以前は「不明」バケット)")
+except Exception as e:
+    st.error(f"ベンチマーク/期待値の取得エラー: {e}")
+
+st.divider()
+
 # ── AI インサイト ────────────────────────────────────────────────
 st.subheader("🤖 AI インサイト")
 try:

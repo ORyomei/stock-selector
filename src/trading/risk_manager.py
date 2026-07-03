@@ -38,6 +38,10 @@ class RiskManager:
         self.default_stop_loss_pct = config.get("default_stop_loss_pct", 3)
         self.default_take_profit_pct = config.get("default_take_profit_pct", 5)
         self.trailing_stop_pct = config.get("trailing_stop_pct", 2)
+        # 高値が取得価格 +activation% に達するまでトレーリングを武装しない。
+        # 0 なら従来どおり即武装 (浅い含み益を +1〜2% で刈り取ってしまい
+        # 「利小損大」になっていたため、勝ちを伸ばすゲートとして導入)。
+        self.trailing_activation_pct = config.get("trailing_activation_pct", 0)
         self.forbidden_tickers = config.get("forbidden_tickers", [])
 
     def calculate_position_size(
@@ -205,12 +209,17 @@ class RiskManager:
 
         # 3. トレーリングストップ（取得後の高値からの下落で利益を確定）
         #    peak_price は取得後に更新される高値。高値から trailing_stop_pct% 逆行で発動。
+        #    trailing_activation_pct: 高値が取得価格 +activation% に達するまで武装しない
+        #    （浅い含み益での早刈り防止。武装前の下方リスクは損切りライン・
+        #      max_loss ガードが引き続き守る）。
         #    含み益が乗る前（高値が浅い）は通常の損切りラインが機能するよう、
         #    トレーリング水準が取得価格以上になっている場合のみ発動する。
         peak = max(position.peak_price or position.entry_price, current_price)
-        trailing_level = peak * (1 - self.trailing_stop_pct / 100)
-        if trailing_level >= position.entry_price and current_price <= trailing_level:
-            return True, "trailing_stop"
+        activation_level = position.entry_price * (1 + self.trailing_activation_pct / 100)
+        if peak >= activation_level:
+            trailing_level = peak * (1 - self.trailing_stop_pct / 100)
+            if trailing_level >= position.entry_price and current_price <= trailing_level:
+                return True, "trailing_stop"
 
         # 4. 大幅損失ガード（-5% 以上で自動損切り）
         max_loss_pct = self.config.get("max_loss_per_position_pct", 5)

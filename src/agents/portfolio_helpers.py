@@ -39,6 +39,25 @@ def get_max_positions() -> int:
     return get_container().portfolio().get_max_positions()
 
 
+def held_calendar_days(entry_time: datetime | None, now: datetime | None = None) -> int:
+    """JST 暦日ベースの保有日数 (当日=0、翌日=1)。
+
+    AI 手仕舞いの最小保有期間ゲートに使う。entry_time 不明 (kabu 等) は
+    「十分長く保有」とみなして 9999 を返す (AI 手仕舞いを永久に封じない)。
+    """
+    from datetime import timedelta, timezone
+
+    if entry_time is None:
+        return 9999
+    jst = timezone(timedelta(hours=9))
+    if entry_time.tzinfo is None:
+        entry_time = entry_time.replace(tzinfo=UTC)
+    now = now or datetime.now(UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    return (now.astimezone(jst).date() - entry_time.astimezone(jst).date()).days
+
+
 def confidence_to_float(label: str) -> float:
     """Convert Japanese confidence label to a numeric value."""
     return {
@@ -70,6 +89,38 @@ def total_equity_jpy() -> float:
     for p in broker.get_positions():
         equity += _position_value_jpy(p.ticker, p.current_price, p.quantity)
     return equity
+
+
+def record_equity_snapshot() -> None:
+    """総資産スナップショットを logs/equity_history.jsonl に追記する。
+
+    サイクル毎に呼ばれ、ダッシュボードの「総資産 vs ベンチマーク (TOPIX)」
+    比較に使う時系列を蓄積する。失敗してもサイクルは止めない。
+    """
+    try:
+        import json
+
+        from infra.container import PROJECT_DIR
+
+        broker = get_container().broker()
+        bal = broker.get_balance()
+        positions = broker.get_positions()
+        equity = float(bal.get("cash_jpy", 0) or 0) + float(bal.get("cash_usd", 0) or 0) * USD_JPY_APPROX
+        for p in positions:
+            equity += _position_value_jpy(p.ticker, p.current_price, p.quantity)
+
+        path = PROJECT_DIR / "logs" / "equity_history.jsonl"
+        path.parent.mkdir(exist_ok=True)
+        rec = {
+            "ts": datetime.now(UTC).isoformat(),
+            "equity_jpy": round(equity),
+            "cash_jpy": round(float(bal.get("cash_jpy", 0) or 0)),
+            "positions": len(positions),
+        }
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"⚠️ equity snapshot skipped: {e}", file=sys.stderr)
 
 
 def today_realized_pnl() -> float:

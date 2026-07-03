@@ -1,6 +1,7 @@
 {
   "broker": "simulator",
   "ai_exit_advisor": true,
+  "ai_exit_min_hold_days": 1,
   "ai_reflection": true,
   "ai_portfolio_review": true,
   "simulator": {
