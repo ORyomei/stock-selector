@@ -84,6 +84,24 @@ def test_bucket_stats():
     assert stats["4-10日"]["count"] == 1
 
 
+# ── _hold_days_jst (ポートフォリオ表の保有日数) ──────────────────
+
+
+def test_hold_days_jst_parses_iso():
+    from datetime import datetime, timedelta, timezone
+
+    jst = timezone(timedelta(hours=9))
+    today = datetime.now(jst).date()
+    entry = datetime(today.year, today.month, today.day, 9, 30, tzinfo=jst) - timedelta(days=3)
+    assert dd._hold_days_jst(entry.isoformat()) == 3
+
+
+def test_hold_days_jst_handles_missing_and_garbage():
+    assert dd._hold_days_jst(None) is None
+    assert dd._hold_days_jst("") is None
+    assert dd._hold_days_jst("garbage") is None
+
+
 # ── equity_history (JSONL 読み込み) ──────────────────────────────
 
 

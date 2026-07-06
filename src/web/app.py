@@ -53,6 +53,8 @@ try:
     m3.metric("含み損益", f"¥{ov['unrealized_pnl']:+,.0f}")
 
     if ov["holdings"]:
+        import pandas as pd
+
         rows = []
         for h in ov["holdings"]:
             over = h["concentration_pct"] > ov["max_position_pct"]
@@ -64,11 +66,31 @@ try:
                 "現在": h["current"],
                 "損益%": h["pnl_pct"],
                 "損益¥": h["pnl"],
+                "保有日": h.get("hold_days"),
+                "損益%/日": h.get("pnl_pct_per_day"),
                 "集中度%": f"{h['concentration_pct']}" + ("  ⚠️" if over else ""),
                 "損切りまで%": h["dist_to_stop_pct"],
                 "利確まで%": h["dist_to_take_pct"],
             })
-        st.dataframe(rows, width='stretch', hide_index=True)
+
+        # 日本式カラー: 上昇 = 赤 / 下落 = 緑 (損益セルの文字色)
+        def _jp_pnl_color(v: object) -> str:
+            if isinstance(v, int | float):
+                if v > 0:
+                    return "color: #e53935; font-weight: 600"
+                if v < 0:
+                    return "color: #00a86b; font-weight: 600"
+            return ""
+
+        styled = (
+            pd.DataFrame(rows)
+            .style.map(_jp_pnl_color, subset=["損益%", "損益¥", "損益%/日"])
+            .format(
+                {"損益%": "{:+.2f}", "損益¥": "{:+,.0f}", "損益%/日": "{:+.2f}"},
+                na_rep="—",
+            )
+        )
+        st.dataframe(styled, width='stretch', hide_index=True)
         over_list = [h["ticker"] for h in ov["holdings"] if h["concentration_pct"] > ov["max_position_pct"]]
         if over_list:
             st.warning(f"集中超過 (上限{ov['max_position_pct']:.0f}%): {', '.join(over_list)} — 一部利確を検討")

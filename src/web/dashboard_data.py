@@ -113,6 +113,19 @@ def daemon_status() -> dict[str, Any]:
 # ── portfolio ────────────────────────────────────────────────────
 
 
+def _hold_days_jst(entry_iso: str | None) -> int | None:
+    """エントリー時刻 (ISO) から JST 暦日ベースの保有日数を返す (当日=0)。"""
+    if not entry_iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(entry_iso))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return (datetime.now(UTC).astimezone(_JST).date() - dt.astimezone(_JST).date()).days
+    except (ValueError, TypeError):
+        return None
+
+
 def portfolio_overview() -> dict[str, Any]:
     pf = get_container().portfolio().load() or {}
     bal = pf.get("balance", {})
@@ -132,6 +145,11 @@ def portfolio_overview() -> dict[str, Any]:
         pnl_pct = ((current / entry - 1) * 100) if entry else 0.0
         stop = p.get("stop_loss")
         take = p.get("take_profit")
+        hold_days = _hold_days_jst(p.get("entry_time"))
+        # 保有期間あたりの効率 (日次換算)。当日建ては1日とみなす
+        pnl_pct_per_day = (
+            round(pnl_pct / max(1, hold_days), 2) if hold_days is not None else None
+        )
         holdings.append({
             "ticker": ticker,
             "name": _resolve_name(ticker),
@@ -141,6 +159,8 @@ def portfolio_overview() -> dict[str, Any]:
             "market_value": round(current * qty, 2),
             "pnl": round(pnl, 0),
             "pnl_pct": round(pnl_pct, 2),
+            "hold_days": hold_days,
+            "pnl_pct_per_day": pnl_pct_per_day,
             "stop_loss": stop,
             "take_profit": take,
             "dist_to_stop_pct": round((current / stop - 1) * 100, 1) if stop else None,
