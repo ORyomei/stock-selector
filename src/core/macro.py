@@ -34,6 +34,103 @@ MACRO_SYMBOLS = {
 }
 
 
+def compute_env_score(data: dict) -> tuple[int, list[str]]:
+    """マクロ指標から市場環境スコアとシグナル列を算出する (純関数)。
+
+    従来は VIX/米金利/S&P500 のみで、取引対象である日本市場を見ておらず
+    「TOPIX が3日続落しても neutral 固定」という欠陥があった。
+    日経平均のモメンタム (5日/20日) を最重要入力として追加している。
+    """
+    env_score = 0
+    env_signals: list[str] = []
+
+    def _pct(key: str, field: str) -> float | None:
+        raw = data.get(key, {}).get(field)
+        if not raw:
+            return None
+        try:
+            return float(str(raw).strip("%"))
+        except ValueError:
+            return None
+
+    # 日経平均モメンタム (取引対象市場 — 最重要)
+    nikkei_5d = _pct("NIKKEI", "change_5d")
+    if nikkei_5d is not None:
+        if nikkei_5d < -3:
+            env_score -= 20
+            env_signals.append(f"日経急落(5日{nikkei_5d:+.1f}%) → リスクオフ")
+        elif nikkei_5d < -1.5:
+            env_score -= 10
+            env_signals.append(f"日経下落(5日{nikkei_5d:+.1f}%) → 警戒")
+        elif nikkei_5d > 3:
+            env_score += 10
+            env_signals.append(f"日経上昇(5日{nikkei_5d:+.1f}%)")
+    nikkei_20d = _pct("NIKKEI", "change_20d")
+    if nikkei_20d is not None:
+        if nikkei_20d < -5:
+            env_score -= 10
+            env_signals.append(f"日経下落トレンド(20日{nikkei_20d:+.1f}%)")
+        elif nikkei_20d > 5:
+            env_score += 10
+            env_signals.append(f"日経上昇トレンド(20日{nikkei_20d:+.1f}%)")
+
+    # VIX 評価
+    vix = data.get("VIX", {}).get("current")
+    if vix is not None:
+        if vix < 15:
+            env_score += 20
+            env_signals.append(f"VIX低い({vix:.1f}) → リスクオン")
+        elif vix < 20:
+            env_score += 10
+            env_signals.append(f"VIX通常({vix:.1f})")
+        elif vix < 30:
+            env_score -= 10
+            env_signals.append(f"VIXやや高い({vix:.1f}) → 警戒")
+        else:
+            env_score -= 20
+            env_signals.append(f"VIX高い({vix:.1f}) → リスクオフ")
+
+    # 金利動向
+    us10y = data.get("US10Y", {}).get("current")
+    if us10y is not None:
+        us10y_5d = _pct("US10Y", "change_5d")
+        if us10y_5d is not None:
+            if us10y_5d > 5:
+                env_score -= 10
+                env_signals.append(f"金利急上昇({us10y_5d:+.2f}%) → 株式に逆風")
+            elif us10y_5d < -5:
+                env_score += 10
+                env_signals.append(f"金利低下({us10y_5d:+.2f}%) → 株式に追い風")
+
+    # S&P500 トレンド
+    sp_change_20d = _pct("SP500", "change_20d")
+    if sp_change_20d is not None:
+        if sp_change_20d > 5:
+            env_score += 10
+            env_signals.append(f"S&P500上昇トレンド({sp_change_20d:+.2f}%)")
+        elif sp_change_20d < -5:
+            env_score -= 10
+            env_signals.append(f"S&P500下落トレンド({sp_change_20d:+.2f}%)")
+
+    # 原油動向 (シグナルのみ)
+    oil_change_20d = _pct("OIL", "change_20d")
+    if oil_change_20d is not None:
+        if oil_change_20d > 10:
+            env_signals.append(f"原油急騰({oil_change_20d:+.2f}%) → インフレ懸念")
+        elif oil_change_20d < -10:
+            env_signals.append(f"原油急落({oil_change_20d:+.2f}%) → デフレ/景気懸念")
+
+    # ドル円 (シグナルのみ)
+    usdjpy_change_20d = _pct("USDJPY", "change_20d")
+    if usdjpy_change_20d is not None:
+        if usdjpy_change_20d > 3:
+            env_signals.append(f"円安進行({usdjpy_change_20d:+.2f}%) → 輸出企業に追い風")
+        elif usdjpy_change_20d < -3:
+            env_signals.append(f"円高進行({usdjpy_change_20d:+.2f}%) → 輸出企業に逆風")
+
+    return env_score, env_signals
+
+
 def fetch_macro(period: str = "3mo"):
     data = {}
 
@@ -81,66 +178,7 @@ def fetch_macro(period: str = "3mo"):
             continue
 
     # ---- 市場環境スコア算出 ----
-    env_score = 0
-    env_signals = []
-
-    # VIX 評価
-    vix = data.get("VIX", {}).get("current")
-    if vix is not None:
-        if vix < 15:
-            env_score += 20
-            env_signals.append(f"VIX低い({vix:.1f}) → リスクオン")
-        elif vix < 20:
-            env_score += 10
-            env_signals.append(f"VIX通常({vix:.1f})")
-        elif vix < 30:
-            env_score -= 10
-            env_signals.append(f"VIXやや高い({vix:.1f}) → 警戒")
-        else:
-            env_score -= 20
-            env_signals.append(f"VIX高い({vix:.1f}) → リスクオフ")
-
-    # 金利動向
-    us10y = data.get("US10Y", {}).get("current")
-    if us10y is not None:
-        us10y_5d = data.get("US10Y", {}).get("change_5d")
-        if us10y_5d:
-            change = float(us10y_5d.strip("%"))
-            if change > 5:
-                env_score -= 10
-                env_signals.append(f"金利急上昇({us10y_5d}) → 株式に逆風")
-            elif change < -5:
-                env_score += 10
-                env_signals.append(f"金利低下({us10y_5d}) → 株式に追い風")
-
-    # S&P500 トレンド
-    sp_change_20d = data.get("SP500", {}).get("change_20d")
-    if sp_change_20d:
-        change = float(sp_change_20d.strip("%"))
-        if change > 5:
-            env_score += 10
-            env_signals.append(f"S&P500上昇トレンド({sp_change_20d})")
-        elif change < -5:
-            env_score -= 10
-            env_signals.append(f"S&P500下落トレンド({sp_change_20d})")
-
-    # 原油動向
-    oil_change_20d = data.get("OIL", {}).get("change_20d")
-    if oil_change_20d:
-        change = float(oil_change_20d.strip("%"))
-        if change > 10:
-            env_signals.append(f"原油急騰({oil_change_20d}) → インフレ懸念")
-        elif change < -10:
-            env_signals.append(f"原油急落({oil_change_20d}) → デフレ/景気懸念")
-
-    # ドル円
-    usdjpy_change_20d = data.get("USDJPY", {}).get("change_20d")
-    if usdjpy_change_20d:
-        change = float(usdjpy_change_20d.strip("%"))
-        if change > 3:
-            env_signals.append(f"円安進行({usdjpy_change_20d}) → 輸出企業に追い風")
-        elif change < -3:
-            env_signals.append(f"円高進行({usdjpy_change_20d}) → 輸出企業に逆風")
+    env_score, env_signals = compute_env_score(data)
 
     # 環境判定
     if env_score >= 20:

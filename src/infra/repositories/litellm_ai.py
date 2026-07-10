@@ -15,7 +15,9 @@ litellm.suppress_debug_info = True
 
 AI_PROVIDERS: dict[str, dict[str, Any]] = {
     "copilot": {
-        "model": "github_copilot/claude-haiku-4.5",
+        # sonnet-4.5: 判断品質を優先 (haiku-4.5 から切替 2026-07-10)。
+        # opus 系は Copilot プランで未提供 (BadRequestError) を確認済み
+        "model": "github_copilot/claude-sonnet-4.5",
         "token_env": None,
     },
     "github": {

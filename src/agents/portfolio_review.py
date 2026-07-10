@@ -31,6 +31,11 @@ def _sector(ticker: str) -> str:
     """銘柄のセクター (yfinance, キャッシュ)。ETF等で取れなければ「分散/ETF」。"""
     if ticker in _SECTOR_CACHE:
         return _SECTOR_CACHE[ticker]
+    from core.etf import is_etf
+
+    if is_etf(ticker):
+        _SECTOR_CACHE[ticker] = "分散/ETF"
+        return "分散/ETF"  # ETF は quoteSummary を叩かない (404 の無駄撃ち防止)
     sec = "不明"
     try:
         with contextlib.redirect_stdout(io.StringIO()):

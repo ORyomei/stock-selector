@@ -63,29 +63,44 @@ class TradingSignal:
 
     def validate(self) -> bool:
         """シグナルの妥当性チェック"""
+        return self.validation_error() is None
+
+    def validation_error(self) -> str | None:
+        """妥当性チェック。問題があれば最初に該当した理由を返す (なければ None)。
+
+        従来は bool のみで「validation failed」としか分からず原因調査が
+        難航したため、どのルールで落ちたかを返すようにした。
+        """
         if not 0.0 <= self.confidence <= 1.0:
-            return False
+            return f"confidence が範囲外 ({self.confidence})"
         if self.target_price <= 0:
-            return False
+            return f"target_price が不正 ({self.target_price})"
         if self.stop_loss_price <= 0:
-            return False
+            return f"stop_loss_price が不正 ({self.stop_loss_price})"
         if self.take_profit_price <= 0:
-            return False
+            return f"take_profit_price が不正 ({self.take_profit_price})"
         if self.entry_price < 0:
-            return False
+            return f"entry_price が不正 ({self.entry_price})"
 
-        # 買いの場合: stop_loss < entry_price < take_profit
-        if self.action == TradeAction.BUY:
-            if not (self.stop_loss_price < self.target_price <= self.take_profit_price):
-                return False
+        # 買いの場合: stop_loss < target <= take_profit
+        if self.action == TradeAction.BUY and not (
+            self.stop_loss_price < self.target_price <= self.take_profit_price
+        ):
+            return (
+                f"BUY の価格関係が不正 (stop {self.stop_loss_price} < "
+                f"target {self.target_price} <= take {self.take_profit_price} を満たさない)"
+            )
 
-        # 売りの場合: take_profit < entry_price < stop_loss
-        elif self.action == TradeAction.SELL and not (  # noqa: SIM102
+        # 売りの場合: take_profit < target <= stop_loss
+        if self.action == TradeAction.SELL and not (
             self.take_profit_price < self.target_price <= self.stop_loss_price
         ):
-            return False
+            return (
+                f"SELL の価格関係が不正 (take {self.take_profit_price} < "
+                f"target {self.target_price} <= stop {self.stop_loss_price} を満たさない)"
+            )
 
-        return True
+        return None
 
     def to_dict(self) -> dict[str, Any]:
         """JSON シリアライズ用"""

@@ -73,9 +73,10 @@ class TradeExecutor:
         }
 
         try:
-            # 1. シグナルの妥当性チェック
-            if not signal.validate():
-                result["reason"] = "Invalid signal: validation failed"
+            # 1. シグナルの妥当性チェック (失敗理由付き)
+            validation_error = signal.validation_error()
+            if validation_error is not None:
+                result["reason"] = f"Invalid signal: {validation_error}"
                 return result
 
             # 2. 現在のポジション・残高を取得

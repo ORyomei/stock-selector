@@ -56,6 +56,11 @@ def _days_to_earnings(ticker: str) -> int | None:
 
     import yfinance as yf
 
+    from core.etf import is_etf
+
+    if is_etf(ticker):
+        return None  # ETF に決算はない (quoteSummary 404 の無駄撃ち防止)
+
     cal = yf.Ticker(ticker).calendar
     dates = cal.get("Earnings Date") or [] if isinstance(cal, dict) else []
     return _earnings_days_from(dates, date.today())
