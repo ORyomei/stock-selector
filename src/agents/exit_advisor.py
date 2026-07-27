@@ -217,7 +217,7 @@ def advise_exits(
     positions: list[Any],
     scenario: str,
     *,
-    provider: str = "copilot",
+    provider: str = "claude_code",
     model: str | None = None,
     log: Any = lambda *_: None,
 ) -> list[dict[str, Any]]:

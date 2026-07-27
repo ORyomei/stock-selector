@@ -394,7 +394,7 @@ def run_analysis(
     span: str,
     depth: str,
     use_ai: bool = False,
-    ai_provider: str = "copilot",
+    ai_provider: str = "claude_code",
     ai_model: str | None = None,
 ) -> str | None:
     """Execute the full analysis pipeline and save a report."""
@@ -526,7 +526,7 @@ def daemon_loop(
     depth: str,
     interval: int,
     use_ai: bool = False,
-    ai_provider: str = "copilot",
+    ai_provider: str = "claude_code",
     ai_model: str | None = None,
 ) -> None:
     """Run analysis on a loop at the specified interval."""

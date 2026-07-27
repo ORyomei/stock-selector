@@ -69,10 +69,14 @@ class LiteLLMChat(BaseChatModel):
         call_kwargs: dict[str, Any] = {
             "model": self.model_name,
             "messages": litellm_messages,
-            "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "timeout": self.timeout,
         }
+        # Claude Sonnet 5 / Opus 4.7+ 等は temperature を送ると 400 になる
+        from infra.repositories.litellm_ai import supports_sampling_params
+
+        if supports_sampling_params(self.model_name):
+            call_kwargs["temperature"] = self.temperature
         if stop:
             call_kwargs["stop"] = stop
 
@@ -164,7 +168,7 @@ def _to_litellm_messages(messages: list[BaseMessage]) -> list[dict[str, Any]]:
 
 
 def get_chat_model(
-    provider: str = "copilot",
+    provider: str = "claude_code",
     model: str | None = None,
     **kwargs: Any,
 ) -> LiteLLMChat:

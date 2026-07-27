@@ -485,7 +485,7 @@ def run_trade_graph(
     min_score: int = 10,
     max_signals: int = 2,
     dry_run: bool = True,
-    provider: str = "copilot",
+    provider: str = "claude_code",
     model: str | None = None,
 ) -> dict[str, Any]:
     """Execute the LangGraph trading agent and return results.
@@ -549,7 +549,6 @@ def run_trade_graph(
 
     # Step 2: ReAct agent analysis
     log("\nStep 2: AI分析エージェント起動...")
-    llm = get_chat_model(provider=provider, model=model)
     system_prompt = _build_system_prompt(
         market, min_score, max_signals, dry_run,
         scenario=scenario, scenarios_cfg=scenarios_cfg, lessons=lessons,
@@ -558,7 +557,6 @@ def run_trade_graph(
     # シグナル提出は構造化ツール経由 (スキーマ強制でフィールド欠落を根絶)
     captured: dict[str, Any] = {}
     submit_tool = _make_submit_signals_tool(captured)
-    agent = create_react_agent(llm, [*ALL_TOOLS, submit_tool], prompt=system_prompt)
 
     user_msg = (
         f"現在 {now:%Y-%m-%d %H:%M} JST です。"
@@ -566,51 +564,76 @@ def run_trade_graph(
         f"（現在の市場シナリオ: {scenario} / {scen_label}）"
     )
 
-    # メインエージェント呼び出し（threading.Thread + join(timeout) による wall-clock タイムアウト）
-    # asyncio.wait_for はブロッキングI/O中にキャンセル不可なので、スレッドレベルで制御する
-    import threading
-
-    _AGENT_TIMEOUT = 180
-    _result_holder: list[Any] = [None]
-    _error_holder: list[Any] = [None]
-
-    def _invoke_sync() -> None:
-        try:
-            _result_holder[0] = agent.invoke(
-                {"messages": [("user", user_msg)]},
-                # submit_signals の呼び出し+応答で 2 ステップ余分に消費する
-                config={"recursion_limit": 12},
-            )
-        except Exception as exc:
-            _error_holder[0] = exc
-
-    _agent_thread = threading.Thread(target=_invoke_sync, daemon=True)
-    _agent_thread.start()
-    _agent_thread.join(timeout=_AGENT_TIMEOUT)
-
-    timed_out = _agent_thread.is_alive()
-    if timed_out:
-        log(f"  -> ⚠️ AI エージェントが {_AGENT_TIMEOUT}s でタイムアウト。シグナルなしで続行します。")
-        result = {"messages": []}
-    elif _error_holder[0] is not None:
-        log(f"  -> ⚠️ AI エージェントエラー: {_error_holder[0]}")
-        result = {"messages": []}
-    else:
-        result = _result_holder[0] or {"messages": []}
-    messages = result.get("messages", [])
-    # タイムアウト時はゾンビスレッドが後から captured を埋める可能性があるため読まない
-    tool_signals = None if timed_out else captured.get("signals")
-
-    # Extract final AI message
+    timed_out = False
     final_text = ""
-    for msg in reversed(messages):
-        if hasattr(msg, "content") and msg.content and not hasattr(msg, "tool_call_id"):
-            final_text = msg.content
-            break
+    trace_steps: list[dict[str, Any]] = []
+
+    if provider == "claude_code":
+        # Claude Agent SDK (サブスク認証・headless) 経路 — litellm を使わない
+        from agents.claude_agent import run_trade_agent_via_sdk
+
+        log("  -> Claude Agent SDK (サブスク) 経路")
+        try:
+            final_text, trace_steps = run_trade_agent_via_sdk(
+                system_prompt, user_msg, [*ALL_TOOLS, submit_tool],
+                model=model or "sonnet", log=log,
+            )
+        except TimeoutError:
+            log("  -> ⚠️ AI エージェントがタイムアウト。シグナルなしで続行します。")
+            timed_out = True
+        except Exception as exc:
+            log(f"  -> ⚠️ AI エージェントエラー: {exc}")
+    else:
+        # LangGraph ReAct + litellm 経路 (copilot / anthropic / openai)
+        llm = get_chat_model(provider=provider, model=model)
+        agent = create_react_agent(llm, [*ALL_TOOLS, submit_tool], prompt=system_prompt)
+
+        # メインエージェント呼び出し（threading.Thread + join(timeout) による wall-clock タイムアウト）
+        # asyncio.wait_for はブロッキングI/O中にキャンセル不可なので、スレッドレベルで制御する
+        import threading
+
+        _AGENT_TIMEOUT = 180
+        _result_holder: list[Any] = [None]
+        _error_holder: list[Any] = [None]
+
+        def _invoke_sync() -> None:
+            try:
+                _result_holder[0] = agent.invoke(
+                    {"messages": [("user", user_msg)]},
+                    # submit_signals の呼び出し+応答で 2 ステップ余分に消費する
+                    config={"recursion_limit": 12},
+                )
+            except Exception as exc:
+                _error_holder[0] = exc
+
+        _agent_thread = threading.Thread(target=_invoke_sync, daemon=True)
+        _agent_thread.start()
+        _agent_thread.join(timeout=_AGENT_TIMEOUT)
+
+        timed_out = _agent_thread.is_alive()
+        if timed_out:
+            log(f"  -> ⚠️ AI エージェントが {_AGENT_TIMEOUT}s でタイムアウト。シグナルなしで続行します。")
+            result = {"messages": []}
+        elif _error_holder[0] is not None:
+            log(f"  -> ⚠️ AI エージェントエラー: {_error_holder[0]}")
+            result = {"messages": []}
+        else:
+            result = _result_holder[0] or {"messages": []}
+        messages = result.get("messages", [])
+
+        # Extract final AI message
+        for msg in reversed(messages):
+            if hasattr(msg, "content") and msg.content and not hasattr(msg, "tool_call_id"):
+                final_text = msg.content
+                break
+        trace_steps = _serialize_trace(messages)
+
+    # タイムアウト時はゾンビ実行が後から captured を埋める可能性があるため読まない
+    tool_signals = None if timed_out else captured.get("signals")
 
     # 思考トレース (ツール呼び出し列・推論) を永続化 — 可視化用。失敗してもサイクルは止めない
     try:
-        _save_trace(file_ts, market, _serialize_trace(messages))
+        _save_trace(file_ts, market, trace_steps)
     except Exception as e:
         log(f"  ⚠️ トレース保存スキップ: {e}")
 
@@ -644,12 +667,9 @@ def run_trade_graph(
             "JSON のみを出力してください。"
         )
         try:
-            from langchain_core.messages import HumanMessage
-            followup_resp = llm.invoke(
-                [HumanMessage(content=followup_prompt)],
-                config={"timeout": 60},
-            )
-            followup_text = followup_resp.content if hasattr(followup_resp, "content") else ""
+            from agents.ai import call_ai
+
+            followup_text = call_ai(followup_prompt, provider, model) or ""
         except Exception as e:
             log(f"  -> フォローアップ失敗: {e}")
             followup_text = ""

@@ -128,7 +128,7 @@ def run_analyze_graph(
     market: str = "jp",
     span: str = "medium",
     depth: str = "standard",
-    provider: str = "copilot",
+    provider: str = "claude_code",
     model: str | None = None,
 ) -> dict[str, Any]:
     """Execute the LangGraph analysis agent and return the report.

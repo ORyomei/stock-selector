@@ -16,16 +16,22 @@ from pathlib import Path
 from dependency_injector import containers, providers
 
 from infra.brokers.factory import create_broker
+from infra.repositories.claude_code_ai import create_ai_repository
 from infra.repositories.file_diary import FileDiaryRepository
 from infra.repositories.google_news import GoogleNewsRepository
 from infra.repositories.json_config import JsonConfigRepository
 from infra.repositories.json_portfolio import JsonPortfolioRepository
-from infra.repositories.litellm_ai import LiteLLMAIRepository
 from infra.repositories.sqlite_analysis import SQLiteAnalysisRepository
 from infra.repositories.yfinance_market_data import YFinanceMarketDataRepository
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 CONFIG_DIR = PROJECT_DIR / "config"
+
+# .env から環境変数を読み込む (ANTHROPIC_API_KEY 等。gitignore 済み)。
+# 全経路がこのモジュールを import するため、ここが唯一の読込地点
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(PROJECT_DIR / ".env")
 DIARY_DIR = PROJECT_DIR / "diary"
 DATA_DIR = PROJECT_DIR / "data"
 PORTFOLIO_FILE = PROJECT_DIR / "portfolio.json"
@@ -49,7 +55,7 @@ class RepositoryContainer(containers.DeclarativeContainer):
     )
 
     ai = providers.Factory(
-        LiteLLMAIRepository,
+        create_ai_repository,
         provider=config.ai_provider,
         model=config.ai_model,
     )
@@ -100,7 +106,7 @@ def get_container(
     global _container
     if _container is None:
         _container = RepositoryContainer()
-        _container.config.ai_provider.from_value(ai_provider or "copilot")
+        _container.config.ai_provider.from_value(ai_provider or "claude_code")
         _container.config.ai_model.from_value(ai_model)
     else:
         if ai_provider is not None:

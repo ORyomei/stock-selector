@@ -14,9 +14,20 @@ from interfaces.repositories.ai import AIRepository
 litellm.suppress_debug_info = True
 
 AI_PROVIDERS: dict[str, dict[str, Any]] = {
+    "claude_code": {
+        # Claude サブスク (Max) の headless モード — 追加クレジット不要・クォータの
+        # 崖なし。litellm ではなく claude_code_ai.ClaudeCodeAIRepository が処理する
+        "model": "sonnet",
+        "token_env": None,
+    },
+    "anthropic": {
+        # Anthropic API 直 (従量課金)。ANTHROPIC_API_KEY + クレジットチャージで有効化
+        "model": "anthropic/claude-sonnet-5",
+        "token_env": "ANTHROPIC_API_KEY",
+    },
     "copilot": {
-        # sonnet-4.5: 判断品質を優先 (haiku-4.5 から切替 2026-07-10)。
-        # opus 系は Copilot プランで未提供 (BadRequestError) を確認済み
+        # Copilot 定額枠 (フォールバック)。sonnet-4.5 は 1x レートでクォータを
+        # 9日で使い切った実績があるため、常用するなら haiku-4.5 (0.33x) を推奨
         "model": "github_copilot/claude-sonnet-4.5",
         "token_env": None,
     },
@@ -28,13 +39,18 @@ AI_PROVIDERS: dict[str, dict[str, Any]] = {
         "model": "gpt-4o",
         "token_env": "OPENAI_API_KEY",
     },
-    "anthropic": {
-        "model": "anthropic/claude-sonnet-4-20250514",
-        "token_env": "ANTHROPIC_API_KEY",
-    },
 }
 
 PROVIDER_NAMES = list(AI_PROVIDERS.keys())
+
+# temperature 等の sampling パラメータを受け付けないモデル (送ると 400)。
+# Claude Sonnet 5 / Opus 4.7+ / Fable 5 は temperature/top_p/top_k が廃止された
+_NO_SAMPLING_MODELS = ("claude-sonnet-5", "claude-opus-4-7", "claude-opus-4-8", "claude-fable-5")
+
+
+def supports_sampling_params(model: str) -> bool:
+    """このモデルに temperature 等の sampling パラメータを送ってよいか。"""
+    return not any(m in model for m in _NO_SAMPLING_MODELS)
 
 
 class LiteLLMAIRepository(AIRepository):
@@ -42,7 +58,7 @@ class LiteLLMAIRepository(AIRepository):
 
     def __init__(
         self,
-        provider: str = "copilot",
+        provider: str = "copilot",  # litellm 系のみ。claude_code は claude_code_ai が担当
         model: str | None = None,
     ) -> None:
         cfg = AI_PROVIDERS.get(provider, AI_PROVIDERS["copilot"])
@@ -60,16 +76,18 @@ class LiteLLMAIRepository(AIRepository):
             return None
 
         try:
-            resp = litellm.completion(
-                model=self._model,
-                messages=[
+            call_kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": [
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.2,
-                max_tokens=4000,
-                timeout=120,
-            )
+                "max_tokens": 4000,
+                "timeout": 120,
+            }
+            if supports_sampling_params(self._model):
+                call_kwargs["temperature"] = 0.2
+            resp = litellm.completion(**call_kwargs)
             content = resp.choices[0].message.content
             return content if content else None
         except Exception as e:

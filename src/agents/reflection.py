@@ -81,7 +81,7 @@ def _build_prompt(stats: dict[str, Any], sample: list[dict[str, Any]]) -> str:
 
 def reflect_on_history(
     *,
-    provider: str = "copilot",
+    provider: str = "claude_code",
     model: str | None = None,
     days: int = 30,
     log: Any = lambda *_: None,
