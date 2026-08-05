@@ -139,6 +139,39 @@ def get_prices(ticker: str, period: str = "3mo") -> dict[str, Any]:
     return _safe(fetch, ticker, period)
 
 
+@tool
+def sector_strength(market: str = "jp") -> dict[str, Any]:
+    """セクター別の騰落率 (相対強度)。TOPIX-17 ETF / 米セクターETF の 1日/5日/20日
+    騰落率を強い順に返す。どのセクターに資金が向かっているか、保有・候補銘柄の
+    セクターが逆風でないかの判断に使う。
+    market: 'jp' (TOPIX-17) / 'us' (米セクター) / 'all'"""
+    from core.sector_strength import run_sector_strength
+    return _safe(run_sector_strength, market)
+
+
+@tool
+def market_calendar(days: int = 7) -> dict[str, Any]:
+    """今後の経済イベント予定 (FOMC・日銀会合・米CPI・雇用統計・SQ 等)。
+    check_macro が「現在値」なのに対し、これは「予定」を返す。重要イベント直前の
+    新規エントリーはギャップリスクがあるため、シグナル生成前に必ず確認すること。
+    内部で別 AI がカレンダーを読むため低速 (20〜40秒)。1サイクル1回まで。
+    days: 何日先まで見るか (既定7)"""
+    from agents.market_calendar import run_market_calendar
+    return _safe(run_market_calendar, days)
+
+
+@tool
+def deep_research(ticker: str, limit: int = 5) -> dict[str, Any]:
+    """ニュース記事の【本文】まで読み込んだ詳細リサーチ。他のツールが見出しや数値しか
+    返さないのに対し、これは記事本文を取得して要約・重要事実・強材料・リスクを返す。
+    内部で別の AI (sonnet) が本文を読むため他ツールより低速 (30〜60秒)。
+    絞り込んだ最終候補 2〜3 銘柄にのみ使い、スクリーニング段階では使わないこと。
+    ticker: ティッカーシンボル (例: 7203.T, NVDA)
+    limit: 本文取得を試みる記事数 (既定5)"""
+    from agents.deep_research import run_deep_research
+    return _safe(run_deep_research, ticker, limit)
+
+
 # ---------------------------------------------------------------------------
 # All tools list (for graph construction)
 # ---------------------------------------------------------------------------
@@ -153,4 +186,11 @@ ALL_TOOLS = [
     get_technical,
     get_news,
     get_prices,
+    sector_strength,
+    market_calendar,
+    deep_research,
 ]
+
+# 内部で入れ子 LLM を呼ぶツール。他は全て決定的 (ルール/数値計算のみ)。
+# 低速・レート枠を消費するため、可視化とコスト把握のために明示しておく。
+AI_TOOLS = {"deep_research", "market_calendar"}

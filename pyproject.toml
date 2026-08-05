@@ -20,6 +20,7 @@ dependencies = [
     "streamlit>=1.58.0",
     "streamlit-echarts==0.4.0",
     "claude-agent-sdk>=0.2.128",
+    "beautifulsoup4>=4.14.3",
 ]
 
 [build-system]

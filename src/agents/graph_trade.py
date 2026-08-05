@@ -205,6 +205,13 @@ def _build_system_prompt(
 - `analyze_fundamentals`: 財務状況確認
 - `check_sentiment`: ニュースセンチメント
 - `get_technical` / `get_news` / `get_prices`: 補助データ
+- `sector_strength`: セクター別騰落率（候補銘柄のセクターが逆風でないか確認）
+- `market_calendar`: **今後の経済イベント予定（FOMC・日銀会合・米CPI・雇用統計・SQ）**。
+  重要イベントの直前は新規エントリーを避けるか確信度を下げること。1サイクル1回まで
+- `deep_research`: **ニュース記事の本文まで読んだ詳細リサーチ**（決算・上方修正・自社株買い等の
+  具体的な数値を抽出）。他ツールは見出しと指標しか見ないため、これが唯一本文を読む手段。
+  内部で別 AI が動くため 30〜60 秒かかる。**submit_signals に載せる最終候補 1〜2 銘柄にだけ**
+  使い、スクリーニング段階では使わないこと
 - `submit_signals`: **シグナル提出（最終ステップ・必須）**
 {("- 枠満杯。新規候補のスコアが保有最低スコアより 5 以上高い場合のみ `action: \"swap\"` + sell_ticker で入れ替え" if available <= 0 else "")}
 

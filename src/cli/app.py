@@ -116,6 +116,44 @@ def news(
     _json_out(fetch_news(query, lang, limit))
 
 
+# ── Sector Strength ──────────────────────────────────────
+@app.command(name="sector-strength")
+def sector_strength(
+    market: Annotated[str, typer.Option(help="対象市場 (jp/us/all)")] = "jp",
+) -> None:
+    """セクター別騰落率 (TOPIX-17 / 米セクターETF)."""
+    from core.sector_strength import run_sector_strength
+
+    _json_out(run_sector_strength(market))
+
+
+# ── Market Calendar ──────────────────────────────────────
+@app.command(name="market-calendar")
+def market_calendar(
+    days: Annotated[int, typer.Option(help="何日先まで")] = 7,
+    ai_provider: Annotated[str, typer.Option(help="入れ子AIのプロバイダー")] = "claude_code",
+    ai_model: Annotated[str, typer.Option(help="入れ子AIのモデル")] = "sonnet",
+) -> None:
+    """今後の経済イベント予定 (FOMC・日銀・CPI等、入れ子AIで抽出)."""
+    from agents.market_calendar import run_market_calendar
+
+    _json_out(run_market_calendar(days, provider=ai_provider, model=ai_model))
+
+
+# ── Deep Research ────────────────────────────────────────
+@app.command(name="deep-research")
+def deep_research(
+    ticker: Annotated[str, typer.Argument(help="ティッカーシンボル")],
+    limit: Annotated[int, typer.Option(help="本文取得を試みる記事数")] = 5,
+    ai_provider: Annotated[str, typer.Option(help="入れ子AIのプロバイダー")] = "claude_code",
+    ai_model: Annotated[str, typer.Option(help="入れ子AIのモデル")] = "sonnet",
+) -> None:
+    """ニュース本文まで読み込む詳細リサーチ (入れ子AIで要約)."""
+    from agents.deep_research import run_deep_research
+
+    _json_out(run_deep_research(ticker, limit, provider=ai_provider, model=ai_model))
+
+
 # ── Sentiment ────────────────────────────────────────────
 @app.command()
 def sentiment(
