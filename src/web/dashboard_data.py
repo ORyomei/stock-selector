@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import UTC, datetime, timedelta, timezone
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -268,6 +270,11 @@ def _initial_capital_jpy() -> float:
         return float(cfg.get("simulator", {}).get("initial_capital_jpy", 0)) or 3_000_000
     except Exception:
         return 3_000_000
+
+
+def initial_capital_jpy() -> float:
+    """元本 (config の simulator.initial_capital_jpy)。損益の基準線に使う。"""
+    return _initial_capital_jpy()
 
 
 def benchmark(days: int = 90) -> dict[str, Any]:
@@ -589,6 +596,123 @@ def recent_traces(n: int = 20) -> list[str]:
         return []
 
 
+TRADES_DIR = DIARY_DIR / "trades"
+
+
+def _filled_trades() -> list[dict[str, Any]]:
+    """約定記録 (FILLED) を JST の時刻付きで新しい順に返す。"""
+    out: list[dict[str, Any]] = []
+    try:
+        paths = sorted(TRADES_DIR.glob("*_trade.json"))
+    except OSError:
+        return out
+    for p in paths:
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if str(d.get("status", "")).upper() != "FILLED":
+            continue
+        try:  # timestamp は UTC の ISO。JST に直してサイクルと突き合わせる
+            dt = datetime.fromisoformat(str(d["timestamp"]))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+        except (KeyError, ValueError, TypeError):
+            continue
+        out.append({
+            "dt": dt.astimezone(_JST),
+            "action": str(d.get("action", "")).upper(),
+            "ticker": str(d.get("ticker", "")),
+            "quantity": d.get("quantity"),
+            "pnl": d.get("pnl"),
+            "fill_price": d.get("fill_price"),
+            "source": str(d.get("source", "")),
+            "reason": str(d.get("reason", "")),
+        })
+    return sorted(out, key=lambda t: t["dt"], reverse=True)
+
+
+def trade_markers() -> list[dict[str, Any]]:
+    """約定をグラフ上に打つためのマーカー (JST の x 文字列付き、古い順)。"""
+    return [
+        {
+            "x": t["dt"].strftime("%Y-%m-%d %H:%M:%S"),
+            "action": t["action"],
+            "ticker": t["ticker"],
+            "quantity": t["quantity"],
+            "pnl": t["pnl"],
+            "source": t["source"],
+        }
+        for t in reversed(_filled_trades())
+    ]
+
+
+def _trace_signals(name: str) -> list[dict[str, Any]]:
+    """そのサイクルで submit_signals に渡されたシグナル (要点のみ)。"""
+    for s in load_trace(name):
+        if s.get("type") != "tool_call" or s.get("tool") != "submit_signals":
+            continue
+        sigs = (s.get("args") or {}).get("signals") or []
+        if not isinstance(sigs, list):
+            return []
+        return [
+            {
+                "ticker": str(g.get("ticker", "")),
+                "action": str(g.get("action", "")).lower(),
+                "score": g.get("score"),
+                "confidence": g.get("confidence"),
+                "sell_ticker": g.get("sell_ticker"),
+                "reason": str(g.get("reason", "")),
+            }
+            for g in sigs
+            if isinstance(g, dict)
+        ]
+    return []
+
+
+def cycle_index(n: int = 60) -> list[dict[str, Any]]:
+    """サイクル一覧 (新しい順)。時刻・シグナル件数・約定を突き合わせて返す。
+
+    トレース名は JST ローカル時刻 (例 2026-08-05_152953_jp)、約定記録の
+    timestamp は UTC なので、JST に揃えてから「そのサイクル開始〜次サイクル開始」
+    の窓に入る約定を割り当てる。
+    """
+    names = recent_traces(n)
+    entries: list[dict[str, Any]] = []
+    for name in names:
+        stamp, _, market = name.rpartition("_")
+        try:
+            dt = datetime.strptime(stamp, "%Y-%m-%d_%H%M%S").replace(tzinfo=_JST)
+        except ValueError:
+            continue
+        entries.append({"name": name, "dt": dt, "market": market})
+
+    entries.sort(key=lambda e: e["dt"])  # 古い順にして窓を作る
+    trades = _filled_trades()
+    for i, e in enumerate(entries):
+        nxt = entries[i + 1]["dt"] if i + 1 < len(entries) else None
+        e["trades"] = [
+            t for t in trades if t["dt"] >= e["dt"] and (nxt is None or t["dt"] < nxt)
+        ]
+        e["signals"] = _trace_signals(e["name"])
+        # 同じ窓に同じ銘柄の約定があれば「通った」シグナルとみなす
+        filled_tickers = {t["ticker"] for t in e["trades"]}
+        for g in e["signals"]:
+            g["filled"] = g["ticker"] in filled_tickers
+        unfilled = [g for g in e["signals"] if not g["filled"]]
+        # 約定と未約定が同居するサイクルは mixed (両方のアイコンを出す)
+        if e["trades"] and unfilled:
+            e["status"] = "mixed"
+        elif e["trades"]:
+            e["status"] = "filled"
+        elif e["signals"]:
+            e["status"] = "rejected"
+        else:
+            e["status"] = "none"
+    entries.reverse()  # 新しい順に戻す
+    return entries
+
+
 def load_trace(name: str) -> list[dict[str, Any]]:
     """指定トレースのステップ列を返す (見つからなければ空)。"""
     try:
@@ -600,27 +724,243 @@ def load_trace(name: str) -> list[dict[str, Any]]:
         return []
 
 
-def trace_to_dot(steps: list[dict[str, Any]]) -> str:
-    """ツール呼び出し列を Graphviz DOT (有向フロー) に変換する。"""
-    nodes: list[str] = ["開始"]
-    for s in steps:
-        if s.get("type") == "tool_call":
-            tool = s.get("tool", "?")
-            args = s.get("args", {}) or {}
-            key = args.get("ticker") or args.get("query") or args.get("market") or ""
-            label = f"{tool}\\n{key}" if key else tool
-            nodes.append(label)
-    nodes.append("最終判断")
+FLOW_COLS = 5  # フロー図の1行あたりノード数（超えたら折り返す）
+_FLOW_WRAP = 22  # ノードラベル1行あたりの目安文字数
 
-    lines = ["digraph trace {", "  rankdir=LR;", '  node [shape=box, style=rounded, fontsize=10];']
+
+def _wrap_label(text: str, width: int = _FLOW_WRAP) -> str:
+    """ラベルを width 文字目安で折り返す。内容は省略しない。
+
+    長いキー (ToolSearch の select リスト等) を1行に出すとノードが極端に
+    横長になるため、区切り文字の直後で改行する。区切りのない長い語は強制分割。
+    """
+    chunks: list[str] = []
+    line = ""
+    for token in re.split(r"(?<=[,、\s])", text):
+        if line and len(line) + len(token) > width:
+            chunks.append(line)
+            line = token
+        else:
+            line += token
+    if line:
+        chunks.append(line)
+
+    out: list[str] = []
+    for chunk in chunks:
+        while len(chunk) > width:
+            out.append(chunk[:width])
+            chunk = chunk[width:]
+        if chunk:
+            out.append(chunk.rstrip())
+    return "\\n".join(out)
+
+
+def _flow_key(args: dict[str, Any]) -> str:
+    """ノードラベルに添える識別子 (ticker / query / market)。"""
+    key = str(args.get("ticker") or args.get("query") or args.get("market") or "")
+    return key.replace("\\", "/").replace('"', "'")
+
+
+def _flow_nodes(steps: list[dict[str, Any]]) -> list[str]:
+    """ツール呼び出し列をノードラベル列に変換する。
+
+    連続する同一ツールの呼び出し (score_stock を4銘柄分など) は1ノードに畳む。
+    畳んだ場合も対象は全件ラベルに載せる。
+    """
+    groups: list[tuple[str, list[str]]] = []
+    for s in steps:
+        if s.get("type") != "tool_call":
+            continue
+        tool = str(s.get("tool", "?"))
+        key = _flow_key(s.get("args", {}) or {})
+        if groups and groups[-1][0] == tool:
+            groups[-1][1].append(key)
+        else:
+            groups.append((tool, [key]))
+
+    nodes = ["開始"]
+    for tool, keys in groups:
+        shown = [k for k in keys if k]
+        head = f"{tool} ×{len(keys)}" if len(keys) > 1 else tool
+        nodes.append(f"{head}\\n{_wrap_label(', '.join(shown))}" if shown else head)
+    nodes.append("最終判断")
+    return nodes
+
+
+def trace_to_dot(steps: list[dict[str, Any]], cols: int = FLOW_COLS) -> str:
+    """ツール呼び出し列を Graphviz DOT (有向フロー) に変換する。
+
+    1行 cols ノードで折り返した格子状に並べる。一直線 (rankdir=LR) だと
+    ツール呼び出しが数十件になったとき横スクロールなしでは読めないため。
+    行ごとに向きを反転する蛇行配置にして、行が右へ階段状にずれるのを防ぐ。
+    """
+    nodes = _flow_nodes(steps)
+    rows = [list(range(s, min(s + cols, len(nodes)))) for s in range(0, len(nodes), cols)]
+
+    lines = [
+        "digraph trace {",
+        "  rankdir=TB;",
+        "  nodesep=0.25;",
+        "  ranksep=0.35;",
+        '  node [shape=box, style="rounded,filled", fontsize=10, margin="0.12,0.06"];',
+    ]
+    ai_tools = _ai_tool_names()
     for i, label in enumerate(nodes):
-        color = "#cce5ff" if label in ("開始", "最終判断") else (
-            "#d4edda" if label.startswith("submit_signals") else "#ffffff")
-        lines.append(f'  n{i} [label="{label}", style="rounded,filled", fillcolor="{color}"];')
-    for i in range(len(nodes) - 1):
-        lines.append(f"  n{i} -> n{i+1};")
+        tool = label.split("\\n")[0].split(" ×")[0]
+        if label in ("開始", "最終判断"):
+            color = "#cce5ff"
+        elif tool in ai_tools:  # 内部で入れ子 LLM を呼ぶツール
+            color = "#ede0f7"
+        elif label.startswith("submit_signals"):
+            color = "#d4edda"
+        else:
+            color = "#ffffff"
+        lines.append(f'  n{i} [label="{label}", fillcolor="{color}"];')
+
+    for r, row in enumerate(rows):
+        visual = row if r % 2 == 0 else row[::-1]  # 奇数行は右→左
+        lines.append("  {rank=same; " + " ".join(f"n{i}" for i in visual) + ";}")
+        # 同一ランク内の辺は tail が左に来る。奇数行は辺を反転して dir=back で
+        # 矢印の向きだけ論理どおりに戻す
+        for a, b in zip(row, row[1:], strict=False):
+            lines.append(f"  n{a} -> n{b};" if r % 2 == 0 else f"  n{b} -> n{a} [dir=back];")
+        if r + 1 < len(rows):  # 行末から次の行頭へ真下に降ろす
+            lines.append(f"  n{row[-1]} -> n{rows[r + 1][0]};")
     lines.append("}")
     return "\n".join(lines)
+
+
+# ── シーケンス図 ──────────────────────────────────────────────────
+# ツール定義を読み込むだけのハーネス呼び出し。分析の流れではないので図から外す
+_SEQ_SKIP_TOOLS = {"ToolSearch"}
+_SEQ_LANE_W = 94  # レーン間隔(px)
+_SEQ_ROW_H = 26  # 1ステップの行高(px)
+_SEQ_TOP = 62  # レーン見出しの高さ(px)
+_SEQ_LEFT = 60  # 左端の余白(px)
+
+
+def _all_tool_names() -> list[str]:
+    """登録されている全ツール名 (定義順)。取得できなければ空。"""
+    try:
+        from agents.tools import ALL_TOOLS
+
+        return [t.name for t in ALL_TOOLS]
+    except Exception:
+        return []
+
+
+def _ai_tool_names() -> set[str]:
+    """内部で入れ子 LLM を呼ぶツール名。定義は agents/tools.py が持つ。"""
+    try:
+        from agents.tools import AI_TOOLS
+
+        return set(AI_TOOLS)
+    except Exception:
+        return set()
+
+
+def _lane_header_lines(name: str) -> list[str]:
+    """レーン見出しを2行までに折る (analyze_fundamentals 等が枠に収まらないため)。"""
+    if len(name) <= 13 or "_" not in name:
+        return [name]
+    head, _, tail = name.partition("_")
+    return [head + "_", tail]
+
+
+def trace_to_sequence_svg(steps: list[dict[str, Any]]) -> tuple[str, int]:
+    """ツール呼び出し列を UML シーケンス図風の SVG に変換し (HTML, 高さpx) を返す。
+
+    レーン (Agent + 使用ツール) を横に並べ、時間は下へ流す。横幅はレーン数
+    だけで決まりステップ数に依存しないため、呼び出しが数十件でも横に伸びない。
+    実線 = 呼び出し、破線 = 結果の返却。引数の全文はタイムライン側で見られる。
+
+    st.html は SVG をサニタイズで落とすため、呼び出し側は components.html
+    (iframe) に渡すこと。高さを返すのは iframe が明示指定を要するため。
+    """
+    events: list[tuple[str, str, str]] = []  # (kind, tool, label)
+    for s in steps:
+        kind = s.get("type")
+        tool = str(s.get("tool", ""))
+        if kind not in ("tool_call", "tool_result") or tool in _SEQ_SKIP_TOOLS:
+            continue
+        label = _flow_key(s.get("args", {}) or {}) if kind == "tool_call" else ""
+        events.append((kind, tool, label))
+
+    if not events:
+        return '<p style="color:#888">ツール呼び出しなし</p>', 60
+
+    # 登録済みツールを常に全部レーンとして立てる (サイクル間で列位置が動かず、
+    # 「何を使わなかったか」も読み取れる)。未登録のツールが出てきたら後ろに足す
+    used = {tool for _, tool, _label in events}
+    lanes = ["Agent"] + _all_tool_names()
+    for _, tool, _label in events:
+        if tool not in lanes:
+            lanes.append(tool)
+    x = {name: _SEQ_LEFT + i * _SEQ_LANE_W for i, name in enumerate(lanes)}
+    width = _SEQ_LEFT + len(lanes) * _SEQ_LANE_W
+    height = _SEQ_TOP + len(events) * _SEQ_ROW_H + 24
+
+    out = [
+        f'<div style="overflow-x:auto"><svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{width}" height="{height}" font-family="sans-serif">',
+        '<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="3" '
+        'orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#555"/></marker></defs>',
+    ]
+    # レーン見出しとライフライン。未使用ツールは淡く、入れ子 AI を持つツールは
+    # 紫で描いて「決定的ではない = 遅い・レート枠を食う」ことが一目で分かるようにする
+    ai_tools = _ai_tool_names()
+    for name in lanes:
+        cx = x[name]
+        on = name == "Agent" or name in used
+        is_ai = name in ai_tools
+        if name == "Agent":
+            fill, stroke, color = "#cce5ff", "#999", "#222"
+        elif is_ai:
+            fill, stroke, color = (
+                ("#ede0f7", "#9575cd", "#4a2c6d") if on else ("#faf6fd", "#e0d4ec", "#b9a8ca")
+            )
+        elif name == "submit_signals" and on:
+            fill, stroke, color = "#d4edda", "#999", "#222"
+        else:
+            fill, stroke, color = ("#f4f4f4", "#999", "#222") if on else ("#fbfbfb", "#ddd", "#aaa")
+        out.append(
+            f'<rect x="{cx - 43}" y="8" width="86" height="34" rx="5" fill="{fill}" '
+            f'stroke="{stroke}"{" stroke-width=\"1.6\"" if is_ai else ""}/>'
+        )
+        head = _lane_header_lines(name)
+        if is_ai:
+            head = ["🤖 " + head[0]] + head[1:]
+        y0 = 24 if len(head) == 1 else 19
+        for j, line in enumerate(head):
+            out.append(
+                f'<text x="{cx}" y="{y0 + j * 11}" font-size="9" fill="{color}" '
+                f'text-anchor="middle">{escape(line)}</text>'
+            )
+        out.append(
+            f'<line x1="{cx}" y1="42" x2="{cx}" y2="{height - 12}" '
+            f'stroke="{"#bbb" if on else "#eee"}" stroke-dasharray="3,3"/>'
+        )
+    # ステップごとの矢印 (実線=呼び出し / 破線=結果)
+    for i, (kind, tool, label) in enumerate(events):
+        y = _SEQ_TOP + i * _SEQ_ROW_H + 10
+        agent_x, tool_x = x["Agent"], x[tool]
+        call = kind == "tool_call"
+        x1, x2 = (agent_x, tool_x) if call else (tool_x, agent_x)
+        dash = "" if call else ' stroke-dasharray="4,3"'
+        out.append(
+            f'<text x="12" y="{y + 4}" font-size="9" fill="#999">{i + 1}</text>'
+            f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" stroke="#555"{dash} '
+            f'marker-end="url(#ah)"/>'
+        )
+        text = escape(label) if call else "結果"
+        if text:
+            color = "#333" if call else "#999"
+            out.append(
+                f'<text x="{(x1 + x2) / 2}" y="{y - 4}" font-size="9" fill="{color}" '
+                f'text-anchor="middle">{text}</text>'
+            )
+    out.append("</svg></div>")
+    return "".join(out), height
 
 
 def ai_insights() -> dict[str, Any]:
