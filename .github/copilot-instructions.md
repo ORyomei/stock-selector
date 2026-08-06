@@ -40,6 +40,9 @@ uv run stock-selector sentiment "トヨタ"
 
 # マクロ・イベント
 uv run stock-selector macro
+uv run stock-selector sector-strength --market jp
+uv run stock-selector market-calendar --days 7      # 経済イベント予定（入れ子AI）
+uv run stock-selector deep-research 5401.T          # ニュース本文リサーチ（入れ子AI）
 uv run stock-selector event-impact --query "関税"
 
 # ポートフォリオ・トレード

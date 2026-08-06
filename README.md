@@ -1,387 +1,173 @@
 # Stock Selector — AI 自動株式売買システム
 
-LangGraph ReAct Agent が**市場スキャン → 多角的分析 → 売買判断 → 注文執行 → リスク管理**を自律的に回す、AI 駆動の自動売買システム。デーモンモードで放置運用が可能。
+Claude Agent (headless / Agent SDK) が**市場スキャン → 多角的分析 → 売買判断 → 注文執行 → リスク管理**を自律的に回す、AI 駆動の自動売買システム。デーモンモードで放置運用が可能。
 
 ## アーキテクチャ
 
 ```
 ┌─────────────────────────────────────────────────┐
-│              auto_trade.py (daemon)              │
+│       stock-selector auto-trade (daemon)         │
 │         30分間隔で自動サイクルを実行              │
 └──────────────────────┬──────────────────────────┘
                        │
           ┌────────────▼────────────┐
-          │  LangGraph ReAct Agent  │  ← LLM が自律的にツールを
-          │  (graph_trade.py)       │    選択・呼び出し・判断
+          │   メイン取引エージェント   │  ← Claude Agent SDK (既定) or
+          │  (agents/claude_agent /  │    LangGraph ReAct (litellm 系)
+          │   agents/graph_trade)    │    が自律的にツールを選択・判断
           └────────────┬────────────┘
-                       │ ツール呼び出し (9種)
-    ┌──────────┬───────┼───────┬──────────┐
-    ▼          ▼       ▼       ▼          ▼
- screener  scorer  technical  macro  fundamentals ...
-    │          │       │       │          │
-    └──────────┴───────┴───────┴──────────┘
-                       │
-              JSON シグナル抽出
-                       │
+                       │ ツール呼び出し (agents/tools.py の ALL_TOOLS)
+    ┌──────────┬───────┼────────┬──────────────┐
+    ▼          ▼       ▼        ▼              ▼
+ screener  scorer  technical  macro  deep_research(入れ子AI) ...
+    └──────────┴───────┼────────┴──────────────┘
+                       │ submit_signals ツールで提出
+          ┌────────────▼────────────┐
+          │  反証ゲート → 分散チェック │  ← バリデーション + AI レビュー
+          └────────────┬────────────┘
           ┌────────────▼────────────┐
           │     TradeExecutor       │  ← 注文実行は非LLM（安全）
-          │  RiskManager で検証     │
+          │   RiskManager で検証    │
           └────────────┬────────────┘
-                       │
           ┌────────────▼────────────┐
           │   Broker (Sim / kabu)   │  → portfolio.json に永続化
-          │   シミュレーター or 実API │  → diary/ にログ保存
           └─────────────────────────┘
 ```
 
 ### 自動売買サイクルの流れ
 
-1. **自動クローズ判定**（非 LLM）— 損切り・利確・トレーリングストップ・最大保有日数到達のチェック
-1.5. **市場シナリオ判定** — マクロ指標からリスクオン/ニュートラル/リスクオフを判定し、シナリオ別プロンプトを選択
-2. **ReAct Agent 起動** — ポートフォリオ状況・リスク設定・シナリオをプロンプトに注入し、LLM がツールを自律的に呼び出して市場分析（180秒タイムアウト付き）
-3. **シグナル抽出**（非 LLM）— AI 出力から JSON シグナルをパース。失敗時はフォローアップで構造化出力を再要求。**ユニバース外ティッカーは自動却下**
-3.5. **反証ゲート**（非 LLM）— シグナルの必須フィールド・市場環境整合性を検証し、不適格シグナルを却下
-4. **注文実行**（非 LLM）— RiskManager で検証後、成行注文で約定。ポジション枠満杯時は自動で入れ替え（swap）モードに移行
+| Step | 内容 | LLM |
+|---|---|---|
+| 1 | **自動クローズ判定** — 損切り・利確(半分ずつ段階利確)・トレーリング・保有日数 | なし |
+| 1.5 | **市場シナリオ判定** — リスクオン/ニュートラル/リスクオフ → シナリオ別プロンプト | なし |
+| 1.6 | ポートフォリオ健全性チェック（集中超過の警告） | なし |
+| 1.7 | **AI 手仕舞い助言** — 機械ルール非該当のポジションに早期 exit/trim を助言 | 補助AI |
+| 1.8 | **振り返り学習** — 過去のクローズ実績から教訓を抽出しエントリー判断に注入 | 補助AI |
+| 2 | **メインエージェント** — ツールを自律的に呼び分析（SDK 経路 420 秒タイムアウト） | メインAI |
+| 3 | **シグナル抽出** — `submit_signals` ツール経由で構造化受理。ユニバース外は却下 | なし |
+| 3.45 | 執行可能性フィルタ — 1単元コストが評価額上限を超える銘柄を除外 | なし |
+| 3.5 | **反証ゲート** — 必須フィールド・市場環境整合性を検証し不適格を却下 | なし |
+| 3.55 | **ポートフォリオ分散チェック** — セクター過集中となるシグナルを除外 | 補助AI |
+| 4 | **注文実行** — RiskManager 検証 → 成行約定。枠満杯時は swap（入れ替え） | なし |
 
-> 売買の最終実行は LLM の外で行い、安全性を確保している。
+> 売買の最終実行は LLM の外で行い、安全性を確保している。シグナル 0 件（無理に買わない）も正当な判断。
 
-### 各ステップの詳細シーケンス
+### 売りの3系統
 
-#### Step 1: 自動クローズ判定（非 LLM）
+1. **機械ストップ**（Step 1・非LLM）— 損切り / 利確（半分ずつスケールアウト）/ トレーリング（含み益 +5% で武装、高値から 3% 逆行）/ 大幅損失ガード / timespan 別保有日数タイムアウト
+2. **AI 手仕舞い助言**（Step 1.7）— 機械ルールに該当しなかったポジションだけを対象に、エントリー時の thesis（fail_conditions / invalidation_conditions）崩壊・決算接近などを根拠に exit / trim。デフォルトは hold で、機械ストップを止める方向には介入できない
+3. **swap**（Step 2）— ポジション枠満杯時、新規候補のスコアが保有最低スコア +5 以上の場合のみ入れ替え
 
-```
-trade.py --check-and-close
-    │
-    ├─ portfolio.json から全保有ポジションを読み込み
-    │
-    ├─ 各ポジションについて:
-    │   ├─ 現在値を yfinance で取得
-    │   ├─ 損切りライン到達？      → 成行売り (STOP_LOSS)
-    │   ├─ 利確ライン到達？        → 成行売り (TAKE_PROFIT)
-    │   ├─ トレーリングストップ？   → 高値から 2% 逆行で売り (TRAILING_STOP)
-    │   └─ 最大保有日数 (30日) 超過？ → 成行売り (MAX_HOLD_DAYS)
-    │
-    └─ クローズ結果をログ出力（対象なしなら "クローズ対象なし"）
-```
+メインエージェントが出せるアクションは `buy` / `swap` のみで、純粋な売り判断は上記 1・2 に分離されている。
 
-- LLM を一切介さない安全重視の機械的判定
-- 損切り 3%・利確 5%・トレーリング 2% のデフォルト値は `config/risk_limits.json` で変更可能
-- 個別ポジションの損切り/利確はシグナル生成時に銘柄ごとに設定される
+## エージェントツール
 
-#### Step 2: ReAct Agent による市場分析
+ツールの定義・一覧は `src/agents/tools.py` の `ALL_TOOLS` が唯一の真実（現在 12 種）。
 
-```
-create_react_agent(llm, 9_tools, system_prompt)
-    │
-    │  system_prompt に注入される情報:
-    │  ├─ 対象市場 (us/jp/all)、最小スコア閾値、最大シグナル数
-    │  ├─ ポートフォリオ状況 (ポジション数/上限、各保有銘柄の損益)
-    │  └─ 枠満杯時は入れ替えルールを追加
-    │
-    ├─ LLM の自律ツール呼び出し（典型的な流れ）:
-    │   │
-    │   ├─ 1. check_macro()
-    │   │      → VIX / 金利 / 為替 / 原油 / 主要指数
-    │   │      → 環境スコア算出 → -30 以下なら新規買い見送り判断
-    │   │
-    │   ├─ 2. analyze_events()
-    │   │      → 地政学 / 金利 / 関税 / 規制 / テック / エネルギー / パンデミック
-    │   │      → 7 カテゴリのイベント因果分析
-    │   │
-    │   ├─ 3. screen_stocks(market, strategy="all")
-    │   │      → oversold / momentum / breakout / value の 4 戦略
-    │   │      → 各戦略上位 N 件の候補を返却（保有銘柄は除外して検討）
-    │   │
-    │   ├─ 4. 有望候補ごとに詳細分析（LLM が必要と判断した分だけ呼ぶ）:
-    │   │      ├─ score_stock(ticker)         … テクニカルスコア (-100〜+100)
-    │   │      ├─ analyze_fundamentals(ticker) … PER/PBR/ROE/FCF/アナリスト予想
-    │   │      ├─ check_sentiment(ticker)      … ニュースセンチメント
-    │   │      ├─ get_technical(ticker)        … RSI/MACD/BB/SMA/EMA 生データ
-    │   │      ├─ get_news(ticker)             … 直近ヘッドライン
-    │   │      └─ get_prices(ticker)           … 株価・時価総額・52週高安
-    │   │
-    │   └─ 5. 追加調査（LLM の判断で任意）
-    │          └─ セクター比較、別銘柄のスコア確認、マクロ深掘り等
-    │
-    └─ 最終回答: JSON シグナル + マークダウン分析コメント
-```
-
-- ツール呼び出しの順序・回数は LLM が状況に応じて自律的に決定する（上記は典型例）
-- 枠満杯時: 保有最低スコアの銘柄と新規候補を比較し、スコア差 +5 以上なら swap シグナルを出す
-- LLM がシグナル 0 件と判断するのも正当（無理に買わない）
-
-#### Step 3: シグナル抽出（非 LLM）
-
-```
-AI 最終回答テキスト
-    │
-    ├─ parse_ai_json() で ```json ブロックを検索・パース
-    │   ├─ 成功 → signals 配列を取得
-    │   └─ 失敗（JSON なし）
-    │       │
-    │       └─ フォローアップ: 同じ Agent に再度リクエスト
-    │          「分析結果を元に JSON 形式で出力してください」
-    │          └─ 再度 parse_ai_json() でパース
-    │
-    ├─ 各シグナルのバリデーション:
-    │   ├─ action が "buy" または "swap" のみ通過
-    │   ├─ max_signals 件に制限
-    │   └─ entry_price / target_price / stop_loss_price / confidence を正規化
-    │
-    └─ signals: list[dict] を返却
-```
-
-シグナル JSON の構造:
-
-```json
-{
-  "signals": [
-    {
-      "ticker": "8035.T",
-      "action": "buy",           // "buy" | "swap"
-      "score": 45,               // テクニカルスコア
-      "confidence": 0.8,         // 確信度 0.0〜1.0
-      "reason": "RSI 売られすぎ + MACD GC 接近",
-      "entry_price": 0,          // 0 = 成行
-      "target_price": 50000,
-      "stop_loss_price": 42000,
-      "take_profit_price": 52000,
-      "timespan": "swing",       // "short" | "swing" | "medium"
-      "sell_ticker": "9983.T"    // swap 時のみ: 売却対象
-    }
-  ],
-  "market_comment": "市場環境の概要",
-  "skipped": [{"ticker": "MSFT", "reason": "スコア不足"}]
-}
-```
-
-#### Step 4: 注文実行（非 LLM）
-
-```
-signals (list)
-    │
-    ├─ ドライラン → ログ出力のみ、portfolio.json は変更しない
-    │
-    └─ 本番:
-        ├─ swap シグナルの場合:
-        │   ├─ 1. sell_ticker の全株を成行売り (trade.py --close)
-        │   │      ├─ 成功 → SOLD ログ → 次へ
-        │   │      └─ 失敗 → SELL_FAILED ログ → この銘柄スキップ
-        │   └─ 2. 新規 ticker を買い
-        │
-        ├─ buy シグナルの場合:
-        │   ├─ シグナル JSON を diary/signals/ に保存
-        │   ├─ trade.py --from-signal <path> を実行
-        │   │   ├─ RiskManager が検証:
-        │   │   │   ├─ ポジション上限チェック (max 10)
-        │   │   │   ├─ 1ポジション資金比率チェック (max 5%)
-        │   │   │   ├─ 日次損失チェック (max 2%)
-        │   │   │   └─ 重複銘柄チェック
-        │   │   ├─ OrderManager が注文作成
-        │   │   └─ BrokerSimulator が約定
-        │   │       ├─ 現在値を取得 + スプレッド 0.02% 適用
-        │   │       ├─ 資金から差し引き
-        │   │       └─ portfolio.json を更新
-        │   ├─ 成功 (FILLED) → 約定記録を diary/trades/ に保存
-        │   └─ 失敗 → FAILED ログ
-        │
-        └─ 全シグナル処理完了 → diary/ にサイクルログ保存
-```
-
-- RiskManager が不適格と判断した注文は約定前に却下される
-- シミュレーターのスプレッドは 0.02%（往復 0.04%）
-- 約定記録・シグナル・分析ログはすべて `diary/` 配下に永続化
-
-#### デーモンループ
-
-```
-main() --daemon --interval 1800
-    │
-    └─ while True:
-        ├─ run_trade_graph(market, min_score, max_signals, dry_run)
-        │   └─ Step 1〜4 を 1 サイクル実行
-        ├─ エラー発生時 → catch して次サイクルへ継続
-        ├─ sleep(interval) … デフォルト 1800秒 (30分)
-        └─ Ctrl+C → 正常終了
-```
-
-## 主な機能
-
-| 機能 | 説明 |
+| ツール | 説明 |
 |---|---|
-| **AI 自動売買** | LangGraph ReAct Agent が分析→判断→発注を自律実行。デーモンで放置運用 |
-| **銘柄発掘** | 4戦略（売られすぎ・モメンタム・ブレイクアウト・バリュー）で日米市場を横断スキャン |
-| **多角的分析** | テクニカル + ファンダメンタル + ニュースセンチメント + マクロ環境 + イベント因果分析 |
-| **リスク管理** | 損切り・利確・トレーリングストップ・最大保有日数・ポジション上限・マクロ安全弁を自動適用 |
-| **仮想売買** | シミュレーターで注文・損益追跡（将来的に実ブローカー接続可能な設計） |
-| **分析レポート** | 売買判断・テクニカル・ファンダメンタル等の全記録を `diary/` に自動保存 |
-| **バックテスト** | 過去の推奨を実際の値動きと比較し、的中率を検証 |
-| **Copilot Chat 連携** | VS Code Chat から自然言語で含み益確認・個別分析・手動売買も可能 |
+| `check_macro` | VIX・金利・為替・原油・主要指数の現在値 → リスクオン/オフ判定 |
+| `screen_stocks` | 4戦略（oversold / momentum / breakout / value）で日米市場をスキャン |
+| `score_stock` | テクニカルスコア（-100〜+100）、目標価格・損切りライン算出 |
+| `analyze_fundamentals` | PER・PBR・ROE・成長率・アナリスト予想・決算日 |
+| `check_sentiment` | ニュース見出しの辞書センチメント分析 |
+| `analyze_events` | 7カテゴリのキーワードベースイベント分類 |
+| `get_technical` / `get_news` / `get_prices` | 生データ取得 |
+| `sector_strength` | TOPIX-17 ETF / 米セクターETF の騰落率（相対強度） |
+| `market_calendar` 🤖 | **今後の経済イベント予定**（FOMC・日銀・米CPI・雇用統計等）。3時間キャッシュ |
+| `deep_research` 🤖 | **ニュース記事本文まで読む詳細リサーチ**。日本株は Yahoo!ファイナンスを一次ソースに |
+
+🤖 = 内部で入れ子 AI (sonnet) が動くツール（`AI_TOOLS` に列挙）。低速だが、見出しや数値だけでは得られない情報を構造化して返す。他は全て決定的。
 
 ## セットアップ
 
 ```bash
-# Dev Container を開く（推奨）、または手動で:
-uv sync                    # 依存パッケージのインストール
-source .venv/bin/activate  # 仮想環境の有効化
+uv sync    # Python 3.12+ / パッケージ管理は uv
 ```
 
-> Python 3.12+、パッケージ管理は [uv](https://docs.astral.sh/uv/) を使用。
-
-## 自動売買の起動
-
-### デーモンモード（推奨）
-
-```bash
-source .venv/bin/activate
-
-# 全市場を30分間隔で自動売買
-python3 src/scripts/auto_trade.py --daemon --interval 1800
-
-# 日本株のみ
-python3 src/scripts/auto_trade.py --market jp --daemon --interval 1800
-
-# バックグラウンド実行
-nohup python3 -u src/scripts/auto_trade.py --daemon --interval 1800 \
-  > logs/auto_trade_daemon.log 2>&1 &
-echo $! > logs/daemon.pid
-```
-
-各サイクルで以下が自動実行される:
-- 保有銘柄の損切り/利確チェック → 該当があれば自動クローズ
-- ReAct Agent が市場環境・スクリーニング・個別分析を実施
-- 買い/入れ替えシグナルを生成 → RiskManager 検証 → 約定
-- 分析ログを `diary/` に、シグナルを `diary/signals/` に保存
-
-### ドライラン（注文なしテスト）
-
-```bash
-python3 src/scripts/auto_trade.py --dry-run
-```
-
-### レガシーモード（固定パイプライン）
-
-LangGraph を使わず、固定ステップ（screen → score → 判断 → execute）で実行:
-
-```bash
-python3 src/scripts/auto_trade.py --legacy --daemon --interval 1800
-```
-
-### 自動分析レポート（売買なし）
-
-```bash
-# 日本株の中期分析レポートを生成
-python3 src/scripts/auto_analyze.py --market jp --span medium --depth standard
-
-# デーモンモードで定期レポート
-python3 src/scripts/auto_analyze.py --daemon --interval 1800
-```
-
-## リスク管理
-
-`config/risk_limits.json` で制御。マクロ環境が悪化（スコア -30 以下）すると新規買いを自動スキップする安全弁付き。
-
-| パラメータ | デフォルト | 説明 |
-|---|---:|---|
-| 1ポジション最大資金比率 | 5% | 集中投資の防止 |
-| 1日最大損失率 | 2% | 日次ドローダウン制限 |
-| 同時保有上限 | 10 | ポジション数の制限 |
-| デフォルト損切り | 3% | エントリー価格からの下落幅 |
-| デフォルト利確 | 5% | エントリー価格からの上昇幅 |
-| トレーリングストップ | 2% | 高値からの逆行幅 |
-| 最大保有日数 | 30日 | 超過で自動クローズ |
+すべてのコマンドは `uv run stock-selector <command>` で実行する（`.venv` の有効化は不要）。
 
 ## LLM プロバイダー
 
-LiteLLM 経由で複数プロバイダーに対応。デフォルトは Copilot。
+既定は `claude_code` — **Claude サブスク (Max) の headless モード**。Claude Code CLI のログインをそのまま使うため API キー・追加課金なし（メインは Agent SDK、補助AIも同 SDK 経由）。
 
-| プロバイダー | モデル | API キー |
-|---|---|---|
-| `copilot`（デフォルト） | `claude-haiku-4.5` | 不要（Copilot トークン） |
-| `github` | `gpt-4o` | 不要 |
-| `openai` | `gpt-4o` | `OPENAI_API_KEY` |
-| `anthropic` | `claude-sonnet-4` | `ANTHROPIC_API_KEY` |
+| プロバイダー | 経路 | モデル | 認証 |
+|---|---|---|---|
+| `claude_code`（既定） | Claude Agent SDK | `sonnet` | Claude Code ログイン |
+| `copilot` | litellm | `claude-sonnet-4.5` | `stock-selector auth`（device flow） |
+| `anthropic` | litellm | `claude-sonnet-5` | `ANTHROPIC_API_KEY` |
+| `openai` | litellm | `gpt-4o` | `OPENAI_API_KEY` |
 
-## Agent ツール一覧
+定義は `src/infra/repositories/litellm_ai.py` の `AI_PROVIDERS`。litellm 系プロバイダーではメインエージェントが LangGraph ReAct になる。
 
-ReAct Agent が自律的に選択・呼び出す 9 つのツール:
+## 自動売買の起動
 
-| ツール | 説明 |
-|---|---|
-| `check_macro` | VIX・金利・為替・原油・主要指数 → リスクオン/オフ判定 |
-| `screen_stocks` | 4戦略で銘柄発掘（oversold / momentum / breakout / value） |
-| `score_stock` | テクニカルスコア（-100〜+100）、確率・目標価格・損切りライン算出 |
-| `analyze_fundamentals` | PER・PBR・ROE・FCF・アナリスト予想 → ファンダメンタルスコア |
-| `check_sentiment` | Google News ヘッドラインの日英センチメント分析 |
-| `analyze_events` | 地政学・金利・関税等 7 カテゴリのイベント因果分析 |
-| `get_technical` | RSI / MACD / BB / SMA / EMA の生データ取得 |
-| `get_news` | Google News RSS ヘッドライン取得 |
-| `get_prices` | 株価・時価総額・PER・52週高安 |
+```bash
+# デーモン（--daemon で自動バックグラウンド化。nohup 不要）
+uv run stock-selector auto-trade --market jp --daemon --interval 1800
+uv run stock-selector stop                  # 停止
+uv run stock-selector auto-trade --market jp --daemon --fg   # フォアグラウンド実行
+
+# 1サイクルだけ実行 / ドライラン（注文なし）
+uv run stock-selector auto-trade --market jp
+uv run stock-selector auto-trade --market jp --dry-run
+```
+
+- ログ: `logs/auto_trade_daemon.log`、二重起動防止: `.auto_trade.lock`
+- 取引時間外（東証 8:30–16:00 / 米国 22:00–翌6:00 JST 以外）のサイクルは自動 SKIP
+- 主なオプション: `--market us|jp|all`（既定 `jp`）、`--min-score`、`--max-signals`、`--ai-provider`、`--ai-model`
+
+## ダッシュボード（Streamlit・読み取り専用）
+
+```bash
+uv run stock-selector dashboard                    # http://127.0.0.1:8501
+uv run stock-selector dashboard --daemon           # 常駐
+uv run stock-selector dashboard --stop             # 停止
+uv run stock-selector dashboard --host <IP>        # バインド先変更（Tailscale 等）
+```
+
+ポートフォリオ・総資産グラフ（約定マーカー付き）・AI 思考トレース（シーケンス図 / サイクル別タイムライン）を表示。共有ファイルを読むだけでブローカー・デーモンには触れない。
+
+## リスク管理
+
+値の唯一の真実は `config/risk_limits.json`（以下は現在の既定値）。
+
+| パラメータ | 値 | 説明 |
+|---|---:|---|
+| 同時保有上限 | 5 | ポジション数の上限。満杯時は swap のみ |
+| 1ポジション最大比率 | 30% | 集中投資の防止（超過は警告・分散チェック対象） |
+| 1日最大損失率 | 5% | 日次ドローダウン制限 |
+| デフォルト損切り | 3% | シグナル生成時に銘柄ごと上書き可 |
+| デフォルト利確 | 5% | 到達時は半分ずつ段階利確（スケールアウト） |
+| トレーリングストップ | 3% | 高値が取得価格 +5%（activation）に達してから武装 |
+| 大幅損失ガード | 5% | 強制クローズ |
+| 最大保有日数 | timespan 別 | short 5 / swing 21 / medium 60 / long 180 日（フォールバック 30 日） |
+
+マクロ環境スコアが悪化した場合は新規買いを自動スキップする安全弁付き。
 
 ## CLI リファレンス
 
-```bash
-source .venv/bin/activate
-```
-
-### 自動売買・分析
+コマンドの唯一の真実は `src/cli/app.py`。`uv run stock-selector --help` で全一覧。
 
 ```bash
-# 自動売買（デフォルト: LangGraph Agent）
-python3 src/scripts/auto_trade.py [--market us|jp|all] [--daemon] [--interval N] [--dry-run] [--legacy]
+# 分析
+uv run stock-selector screen --market all --strategy all --top 10
+uv run stock-selector score 7203.T
+uv run stock-selector technical 7203.T / fundamentals NVDA / prices 7203.T
+uv run stock-selector macro / sector-strength --market jp
+uv run stock-selector market-calendar --days 7        # 経済イベント予定（入れ子AI）
+uv run stock-selector deep-research 5401.T            # ニュース本文リサーチ（入れ子AI）
+uv run stock-selector news "トヨタ" / sentiment "トヨタ" / event-impact --query "関税"
 
-# 自動分析レポート
-python3 src/scripts/auto_analyze.py [--market us|jp|all] [--span short|swing|medium|all] [--depth quick|standard|detailed] [--daemon]
-```
+# ポートフォリオ・トレード
+uv run stock-selector portfolio status|performance
+uv run stock-selector trade --from-signal diary/signals/xxx.json
+uv run stock-selector alert --check-portfolio
+uv run stock-selector backtest --days 30
 
-### 個別スクリプト
-
-```bash
-# 銘柄スクリーニング
-python3 src/scripts/screener.py --market all --strategy all --top 10
-
-# 総合スコアリング
-python3 src/scripts/scorer.py AAPL
-
-# テクニカル指標
-python3 src/scripts/technical.py 8035.T
-
-# ファンダメンタル分析
-python3 src/scripts/fundamentals.py NVDA
-
-# マクロ指標
-python3 src/scripts/macro.py
-
-# ニュース / センチメント
-python3 src/scripts/fetch_news.py "NVIDIA"
-python3 src/scripts/fetch_sentiment.py "トヨタ自動車"
-
-# 株価データ
-python3 src/scripts/fetch_prices.py 7203.T
-
-# アラート（ウォッチリスト監視 / ポートフォリオチェック）
-python3 src/scripts/alert.py [--check-portfolio]
-
-# バックテスト
-python3 src/scripts/backtest.py [--days 30] [--min-score 60]
-
-# ポートフォリオ管理
-python3 src/scripts/portfolio.py status|performance|buy|sell
-```
-
-## Copilot Chat からの操作
-
-VS Code Chat で自然言語でも操作可能。自動売買と並行して使用できる。
-
-```
-含み益確認                          → 保有銘柄の現在値・含み損益を表示
-保有銘柄一覧                        → ポートフォリオ全体の状況
-NVIDIAを調べて売買判断して           → 個別銘柄の総合分析レポート
-日本株で有望な銘柄を探して           → スクリーニング → 詳細分析
-東京エレクトロンを100万円分買って     → 仮想売買の手動実行
-損切りに引っかかってる銘柄ある？      → ポートフォリオのアラートチェック
-今の市場環境は？                    → マクロ指標・リスクオン/オフ判定
-バックテストして成績を見せて          → 過去推奨の的中率検証
+# 自動化・運用
+uv run stock-selector auto-trade ... / auto-analyze --market jp --ai
+uv run stock-selector dashboard / stop / auth
+uv run stock-selector kabu-check / trading-units      # kabuステーション API
 ```
 
 ## ディレクトリ構成
@@ -389,68 +175,42 @@ NVIDIAを調べて売買判断して           → 個別銘柄の総合分析�
 ```
 stock-selector/
 ├── src/
-│   ├── scripts/                     # 分析・売買スクリプト
-│   │   ├── lib/
-│   │   │   ├── graph_trade.py       #   自動売買 ReAct Agent
-│   │   │   ├── graph_analyze.py     #   分析レポート ReAct Agent
-│   │   │   ├── tools.py             #   LangGraph ツール定義 (9種)
-│   │   │   ├── llm.py               #   LiteLLM ↔ LangChain ブリッジ
-│   │   │   ├── ai.py                #   AI プロバイダー統合
-│   │   │   ├── runner.py            #   スクリプト実行ヘルパー
-│   │   │   └── portfolio.py         #   ポートフォリオ操作
-│   │   ├── auto_trade.py            # 自動売買エントリーポイント
-│   │   ├── auto_analyze.py          # 自動分析エントリーポイント
-│   │   ├── screener.py              # 銘柄スクリーナー
-│   │   ├── scorer.py                # 総合スコアリング
-│   │   ├── technical.py             # テクニカル指標算出
-│   │   ├── fundamentals.py          # ファンダメンタル分析
-│   │   ├── macro.py                 # マクロ経済指標
-│   │   ├── fetch_prices.py          # 株価データ取得
-│   │   ├── fetch_news.py            # ニュース取得
-│   │   ├── fetch_sentiment.py       # センチメント分析
-│   │   ├── alert.py                 # アラート・監視
-│   │   ├── backtest.py              # バックテスト
-│   │   ├── portfolio.py             # ポートフォリオ管理 CLI
-│   │   ├── trade.py                 # 個別売買 CLI
-│   │   └── event_impact_analyzer.py # イベントインパクト分析
-│   ├── trading/                     # 売買エンジン
-│   │   ├── broker_interface.py      #   ブローカー抽象インターフェース
-│   │   ├── simulator.py             #   仮想ブローカー（シミュレーター）
-│   │   ├── brokers/
-│   │   │   └── kabu_station.py      #   auカブコム kabuステーション API
-│   │   ├── order_manager.py         #   注文管理
-│   │   ├── risk_manager.py          #   リスク管理
-│   │   └── trade_executor.py        #   売買実行オーケストレーター
-│   └── infra/                       # インフラ層（DI コンテナ・リポジトリ）
-├── config/
-│   ├── watchlist.json               # 監視銘柄リスト
-│   ├── risk_limits.json             # リスク管理パラメータ
-│   ├── trading_config.json          # 売買設定（ブローカー切替）
-│   ├── prompt_scenarios.json        # シナリオ別プロンプト設定
-│   └── validation_rules.json        # シグナルバリデーションルール
-├── diary/                           # 分析・売買の全記録
-│   ├── signals/                     #   AI 生成シグナル (JSON)
-│   └── trades/                      #   約定記録
-├── logs/                            # デーモンログ
-├── docs/
-│   └── TRADING_SPEC.md              # 売買エンジン設計書
-├── .github/
-│   └── copilot-instructions.md      # Copilot Agent 指示
-├── portfolio.json                   # ポートフォリオ状態
-└── pyproject.toml                   # プロジェクト定義・依存管理
+│   ├── core/          # ビジネスロジック（純粋関数・AIなし）
+│   │                  #   screener / scorer / technical / fundamentals / macro
+│   │                  #   sentiment / news / event_impact / sector_strength ...
+│   ├── agents/        # AI エージェント・デーモン
+│   │   ├── claude_agent.py    #   メインエージェント (Claude Agent SDK)
+│   │   ├── graph_trade.py     #   売買サイクル本体 + LangGraph 経路
+│   │   ├── tools.py           #   ツール定義 (ALL_TOOLS / AI_TOOLS)
+│   │   ├── deep_research.py   #   入れ子AI: ニュース本文リサーチ
+│   │   ├── market_calendar.py #   入れ子AI: 経済イベント予定
+│   │   ├── exit_advisor.py    #   補助AI: 早期手仕舞い助言
+│   │   ├── reflection.py      #   補助AI: 教訓抽出
+│   │   └── portfolio_review.py#   補助AI: 分散チェック
+│   ├── cli/           # typer CLI (エントリーポイント: stock-selector)
+│   ├── trading/       # 売買実行レイヤ (TradeExecutor / RiskManager / OrderManager)
+│   ├── infra/         # DI コンテナ・リポジトリ実装 (broker / AI / market data)
+│   ├── interfaces/    # 抽象インターフェース
+│   └── web/           # Streamlit ダッシュボード
+├── config/            # risk_limits / trading_config / watchlist / シナリオ別プロンプト
+├── diary/             # 分析・シグナル・約定・思考トレースの全記録 (gitignore)
+├── logs/              # デーモンログ・総資産スナップショット (gitignore)
+├── docs/              # TRADING_SPEC / ARCHITECTURE_REVIEW
+└── .claude/skills/    # 開発用スキル (sync-docs 等)
 ```
 
 ## 開発
 
 ```bash
-uv run ruff check src/ trading/      # リント
-uv run ruff format src/ trading/     # フォーマット
-uv run pyright src/ trading/         # 型チェック
-uv run pytest                        # テスト
+uv run ruff check src/ && uv run ruff format src/
+uv run pyright src/
+uv run pytest
 ```
+
+コード変更時はドキュメント同期チェック（`.claude/skills/sync-docs`）に従うこと。デーモン関連コードを変更したら、構文チェックだけでなく実際に 1 サイクル動かして検証する。
 
 ## 注意事項
 
 - **投資助言ではない** — 出力は参考情報であり、投資判断の責任はユーザーにある
-- **ブローカー切替可能** — `trading_config.json` の `broker` で `"simulator"` / `"kabu"` を切り替え。kabuステーション API 接続は `KABU_API_PASSWORD` 環境変数が必要
-- API キーは `.env` で管理（`.gitignore` に含まれる）
+- **ブローカー切替** — `config/trading_config.json` の `broker` で `"simulator"` / `"kabu"` を切替。kabuステーション API は `KABU_API_PASSWORD` 環境変数が必要。既定はシミュレーター（仮想売買）
+- API キーは `.env` で管理（gitignore 済み）
