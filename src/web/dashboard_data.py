@@ -249,7 +249,13 @@ _bench_cache: dict[str, tuple[float, Any]] = {}
 
 
 def _price_change_pct(ticker: str, days: int, ttl_sec: int = 900) -> float | None:
-    """ticker の直近 days 日の騰落率% (yfinance)。TTL キャッシュ付き。"""
+    """ticker の直近 days 日の騰落率% (yfinance)。TTL キャッシュ付き。
+
+    yfinance は取得窓の端で分割調整に失敗した異常値を返すことがある
+    (実例: 1306.T の period='90d' 先頭2行だけ約1/10 の価格 → +1051% と算出)。
+    中央値から3倍以上乖離した行はデータ不良とみなして除外する。90日で
+    株価が正しく3倍/3分の1になるケースは指数ETFのベンチマーク用途では無い。
+    """
     import time
 
     key = f"{ticker}:{days}"
@@ -259,6 +265,9 @@ def _price_change_pct(ticker: str, days: int, ttl_sec: int = 900) -> float | Non
     import yfinance as yf
 
     closes = yf.Ticker(ticker).history(period=f"{days}d")["Close"].dropna()
+    if len(closes) >= 2:
+        med = float(closes.median())
+        closes = closes[(closes > med / 3) & (closes < med * 3)]
     val = float((closes.iloc[-1] / closes.iloc[0] - 1) * 100) if len(closes) >= 2 else None
     _bench_cache[key] = (time.time(), val)
     return val
