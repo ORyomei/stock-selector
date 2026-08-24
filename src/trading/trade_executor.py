@@ -83,6 +83,15 @@ class TradeExecutor:
             current_positions = self.broker.get_positions()
             current_balance = self.broker.get_balance()
 
+            # CLOSE は約定後にポジションが消えて entry_price を参照できなくなるため、
+            # 発注前に控えておく (全量クローズの pnl=null バグ対策 / issue #1)
+            close_entry_price = None
+            if signal.action == TradeAction.CLOSE:
+                for pos in current_positions:
+                    if pos.ticker == signal.ticker:
+                        close_entry_price = pos.entry_price
+                        break
+
             # 3. リスクチェック
             is_valid, error_msg = self.risk_manager.validate_order(signal.ticker, current_positions)
             if not is_valid:
@@ -120,12 +129,18 @@ class TradeExecutor:
             if placed_order.status.value == "FILLED":
                 result["success"] = True
 
-                # ポジション更新後の損益
-                updated_positions = self.broker.get_positions()
-                for pos in updated_positions:
-                    if pos.ticker == signal.ticker:
-                        result["pnl"] = round(pos.pnl, 2)
-                        break
+                if close_entry_price is not None and placed_order.fill_price is not None:
+                    # 全量クローズ: ポジションは既に消えているので entry から実現損益を計算
+                    result["pnl"] = round(
+                        (placed_order.fill_price - close_entry_price) * order.quantity, 2
+                    )
+                else:
+                    # BUY: 更新後ポジションの評価損益 (スプレッド分のマイナスが出る)
+                    updated_positions = self.broker.get_positions()
+                    for pos in updated_positions:
+                        if pos.ticker == signal.ticker:
+                            result["pnl"] = round(pos.pnl, 2)
+                            break
 
                 result["reason"] = f"Order filled: {order.quantity} @ {placed_order.fill_price}"
             else:
