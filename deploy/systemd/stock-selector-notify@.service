@@ -1,0 +1,8 @@
+# 障害通知ユニット (OnFailure= から起動される)。%i には失敗したユニット名が入る
+[Unit]
+Description=stock-selector failure notification for %i
+
+[Service]
+Type=oneshot
+User=ryomei
+ExecStart=/home/ryomei/Projects/stock-selector/scripts/notify.sh "🔴 %i が異常終了しました (自動再起動を試行します。復旧しない場合は systemctl status %i で確認)。"

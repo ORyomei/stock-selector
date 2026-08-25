@@ -112,6 +112,21 @@ def daemon_status() -> dict[str, Any]:
     return out
 
 
+def recent_alerts(hours: int = 24) -> list[str]:
+    """logs/alerts.log の直近エントリ (watchdog / OnFailure 通知の受け皿)。"""
+    path = PROJECT_DIR / "logs" / "alerts.log"
+    out: list[str] = []
+    now = datetime.now()
+    for line in _tail(path, 50):
+        try:  # 行頭 "YYYY-MM-DD HH:MM:SS " をパース
+            ts = datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+        if (now - ts).total_seconds() < hours * 3600:
+            out.append(line.strip())
+    return out[-10:]
+
+
 # ── portfolio ────────────────────────────────────────────────────
 
 
@@ -313,6 +328,46 @@ def benchmark(days: int = 90) -> dict[str, Any]:
         pass
     if out["topix_pct"] is not None and out["system_pct"] is not None:
         out["alpha_pct"] = round(out["system_pct"] - out["topix_pct"], 2)
+    return out
+
+
+INCEPTION_DATE = "2026-08-04"  # システム稼働開始日 (指数比較の基準)
+
+
+def index_overlay(ttl_sec: int = 900) -> dict[str, list[list[Any]]]:
+    """稼働開始日を基準に「同じ元本を指数に投じていた場合の損益(¥)」の日足列を返す。
+
+    総資産グラフ (元本からの損益¥) に重ねるためのシリーズ。基準は稼働開始日の
+    終値 (日次評価の累計比較と同じ流儀)。日足終値なので 15:00 JST の点として置く。
+    戻り値: {"nikkei": [[x, pnl_jpy], ...], "topix": [...]}  失敗した系列は空リスト。
+    """
+    import time
+
+    hit = _bench_cache.get("index_overlay")
+    if hit and time.time() - hit[0] < ttl_sec:
+        return hit[1]
+
+    import yfinance as yf
+
+    init = _initial_capital_jpy()
+    out: dict[str, list[list[Any]]] = {"nikkei": [], "topix": []}
+    for key, ticker in (("nikkei", "^N225"), ("topix", "1306.T")):
+        try:
+            closes = yf.Ticker(ticker).history(period="3mo")["Close"].dropna()
+            med = float(closes.median())
+            closes = closes[(closes > med / 3) & (closes < med * 3)]  # データ不良ガード
+            closes = closes[closes.index >= INCEPTION_DATE]
+            if len(closes) < 1:
+                continue
+            base = float(closes.iloc[0])
+            out[key] = [
+                [f"{idx.strftime('%Y-%m-%d')} 15:00:00", round((float(v) / base - 1) * init)]
+                for idx, v in closes.items()
+            ]
+        except Exception:
+            continue
+
+    _bench_cache["index_overlay"] = (time.time(), out)
     return out
 
 

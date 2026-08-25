@@ -41,6 +41,14 @@ c5.metric("振り返り学習", "ON" if ds["ai_reflection"] else "OFF")
 if ds.get("last_cycle"):
     st.caption(f"最新サイクル: {ds['last_cycle']}")
 
+# 障害アラート (watchdog / systemd OnFailure が logs/alerts.log に書く)
+try:
+    _alerts = dd.recent_alerts(hours=24)
+    if _alerts:
+        st.error("**直近24時間の障害アラート**\n\n" + "\n\n".join(f"- {a}" for a in _alerts))
+except Exception:
+    pass
+
 st.divider()
 
 # ── ポートフォリオ ───────────────────────────────────────────────
@@ -177,12 +185,20 @@ try:
             "});return s;}"
         ).js_code
 
+        # 指数オーバーレイ: 同じ元本を指数に投じていた場合の損益線
+        _idx = dd.index_overlay()
+
         _yen = _JsCode("function(v){return '¥'+Number(v).toLocaleString();}").js_code
         _clicked = _st_echarts(
             options={
                 "tooltip": {"trigger": "axis", "formatter": _tip},
                 "legend": {
-                    "data": ["総資産（含み込み）", "実現損益（確定分）", "買い", "決済"],
+                    "data": [
+                        "総資産（含み込み）", "実現損益（確定分）",
+                        "日経平均（同額投資）", "TOPIX（同額投資）", "買い", "決済",
+                    ],
+                    # TOPIX は既定で非表示 (凡例クリックで表示可)。線が多いと読みにくいため
+                    "selected": {"TOPIX（同額投資）": False},
                     "top": 0,
                 },
                 "grid": {"left": 84, "right": 24, "top": 36, "bottom": 56},
@@ -217,6 +233,22 @@ try:
                         "showSymbol": True,
                         "lineStyle": {"width": 2},
                         "data": _r_data,
+                    },
+                    {
+                        "name": "日経平均（同額投資）",
+                        "type": "line",
+                        "showSymbol": False,
+                        "lineStyle": {"width": 1.5, "type": "dashed", "color": "#e6a23c"},
+                        "itemStyle": {"color": "#e6a23c"},
+                        "data": _idx["nikkei"],
+                    },
+                    {
+                        "name": "TOPIX（同額投資）",
+                        "type": "line",
+                        "showSymbol": False,
+                        "lineStyle": {"width": 1.5, "type": "dashed", "color": "#909399"},
+                        "itemStyle": {"color": "#909399"},
+                        "data": _idx["topix"],
                     },
                     {
                         "name": "買い",

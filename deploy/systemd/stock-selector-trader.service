@@ -1,0 +1,29 @@
+# 自動売買デーモン (issue #3)
+# インストール: deploy/systemd/install.sh 参照
+[Unit]
+Description=stock-selector auto-trade daemon
+After=network-online.target
+Wants=network-online.target
+# 3回/10分 落ちたら failed → 通知ユニットへ
+StartLimitIntervalSec=600
+StartLimitBurst=3
+OnFailure=stock-selector-notify@%n.service
+
+[Service]
+Type=simple
+User=ryomei
+WorkingDirectory=/home/ryomei/Projects/stock-selector
+Environment=HOME=/home/ryomei
+Environment=PATH=/home/ryomei/.local/bin:/usr/local/bin:/usr/bin:/bin
+# --fg でフォアグラウンドループ (二重フォークさせない)。flock は残るので手動起動と排他
+ExecStart=/home/ryomei/.local/bin/uv run stock-selector auto-trade --market jp --daemon --fg --interval 1800
+Restart=on-failure
+RestartSec=60
+# stock-selector stop (SIGTERM→sys.exit(0)) は正常終了扱い → 再起動しない
+SuccessExitStatus=0
+# ダッシュボードが読む既存ログファイルへ追記 (journald ではなくファイルが正)
+StandardOutput=append:/home/ryomei/Projects/stock-selector/logs/auto_trade_daemon.log
+StandardError=append:/home/ryomei/Projects/stock-selector/logs/auto_trade_daemon.log
+
+[Install]
+WantedBy=multi-user.target

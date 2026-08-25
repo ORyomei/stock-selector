@@ -1,0 +1,8 @@
+# 死活監視 (timer から15分毎)
+[Unit]
+Description=stock-selector daemon watchdog
+
+[Service]
+Type=oneshot
+User=ryomei
+ExecStart=/home/ryomei/Projects/stock-selector/scripts/watchdog.sh
