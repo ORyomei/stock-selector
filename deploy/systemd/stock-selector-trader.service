@@ -15,6 +15,9 @@ User=ryomei
 WorkingDirectory=/home/ryomei/Projects/stock-selector
 Environment=HOME=/home/ryomei
 Environment=PATH=/home/ryomei/.local/bin:/usr/local/bin:/usr/bin:/bin
+# --fg 経路は _daemonize() の行バッファ化を通らないため、ファイル出力だと
+# ブロックバッファでログが数時間滞留する (8/26 に watchdog 誤報として発覚)
+Environment=PYTHONUNBUFFERED=1
 # --fg でフォアグラウンドループ (二重フォークさせない)。flock は残るので手動起動と排他
 ExecStart=/home/ryomei/.local/bin/uv run stock-selector auto-trade --market jp --daemon --fg --interval 1800
 Restart=on-failure
