@@ -59,6 +59,10 @@ Claude Agent (headless / Agent SDK) が**市場スキャン → 多角的分析 
 
 メインエージェントが出せるアクションは `buy` / `swap` のみで、純粋な売り判断は上記 1・2 に分離されている。
 
+さらに**回転抑制ガード**（`core/churn_guard.py`）が短期往復を機械的に禁止する:
+取得から2営業日未満の swap 売り（fail_conditions 発動時を除く）と、売却から2営業日
+未満の買い直しは却下される。機械ストップ・部分利確（trim）は対象外。
+
 ## エージェントツール
 
 ツールの定義・一覧は `src/agents/tools.py` の `ALL_TOOLS` が唯一の真実（現在 12 種）。
@@ -101,18 +105,29 @@ uv sync    # Python 3.12+ / パッケージ管理は uv
 
 ## 自動売買の起動
 
-```bash
-# デーモン（--daemon で自動バックグラウンド化。nohup 不要）
-uv run stock-selector auto-trade --market jp --daemon --interval 1800
-uv run stock-selector stop                  # 停止
-uv run stock-selector auto-trade --market jp --daemon --fg   # フォアグラウンド実行
+**本番運用は systemd 管理（推奨）**。自動復旧・マシン起動時の自動開始・死活監視付き:
 
-# 1サイクルだけ実行 / ドライラン（注文なし）
-uv run stock-selector auto-trade --market jp
-uv run stock-selector auto-trade --market jp --dry-run
+```bash
+bash deploy/systemd/install.sh                     # 初回インストール（要 sudo）
+sudo systemctl start stock-selector-trader         # 起動
+sudo systemctl restart stock-selector-trader       # コード変更の反映
+systemctl status stock-selector-trader             # 状態確認
 ```
 
-- ログ: `logs/auto_trade_daemon.log`、二重起動防止: `.auto_trade.lock`
+- watchdog（15分毎）が取引時間内のサービス停止・ログ無更新（ハング）を検知し
+  `logs/alerts.log` に通知（ダッシュボードに表示、`.env` の `NTFY_TOPIC` 設定でスマホプッシュも可）
+- クラッシュは60秒で自動再起動。`stock-selector stop` は正常終了扱いで再起動されない
+
+手動実行（開発・検証用）:
+
+```bash
+uv run stock-selector auto-trade --market jp --daemon --interval 1800   # 二重フォークで常駐
+uv run stock-selector stop                  # 停止
+uv run stock-selector auto-trade --market jp            # 1サイクルだけ実行
+uv run stock-selector auto-trade --market jp --dry-run  # ドライラン（注文なし）
+```
+
+- ログ: `logs/auto_trade_daemon.log`、二重起動防止: `.auto_trade.lock`（systemd と手動は排他）
 - 取引時間外（東証 8:30–16:00 / 米国 22:00–翌6:00 JST 以外）のサイクルは自動 SKIP
 - 主なオプション: `--market us|jp|all`（既定 `jp`）、`--min-score`、`--max-signals`、`--ai-provider`、`--ai-model`
 
@@ -125,7 +140,7 @@ uv run stock-selector dashboard --stop             # 停止
 uv run stock-selector dashboard --host <IP>        # バインド先変更（Tailscale 等）
 ```
 
-ポートフォリオ・総資産グラフ（約定マーカー付き）・AI 思考トレース（シーケンス図 / サイクル別タイムライン）を表示。共有ファイルを読むだけでブローカー・デーモンには触れない。
+ポートフォリオ・総資産グラフ（約定マーカー・日経/TOPIX 同額投資オーバーレイ付き）・AI 思考トレース（シーケンス図 / サイクル別タイムライン）・障害アラート（watchdog 検知分）を表示。共有ファイルを読むだけでブローカー・デーモンには触れない。
 
 ## リスク管理
 
@@ -141,6 +156,8 @@ uv run stock-selector dashboard --host <IP>        # バインド先変更（Tai
 | トレーリングストップ | 3% | 高値が取得価格 +5%（activation）に達してから武装 |
 | 大幅損失ガード | 5% | 強制クローズ |
 | 最大保有日数 | timespan 別 | short 5 / swing 21 / medium 60 / long 180 日（フォールバック 30 日） |
+| 最低保有期間 | 2営業日 | AI 判断の swap 売りを禁止（機械ストップ・trim は対象外） |
+| 再入場クールダウン | 2営業日 | 売却直後の買い直しを反証ゲートで却下 |
 
 マクロ環境スコアが悪化した場合は新規買いを自動スキップする安全弁付き。
 
@@ -193,8 +210,10 @@ stock-selector/
 │   ├── interfaces/    # 抽象インターフェース
 │   └── web/           # Streamlit ダッシュボード
 ├── config/            # risk_limits / trading_config / watchlist / シナリオ別プロンプト
-├── diary/             # 分析・シグナル・約定・思考トレースの全記録 (gitignore)
-├── logs/              # デーモンログ・総資産スナップショット (gitignore)
+├── deploy/systemd/    # デーモンの unit ファイル + install.sh
+├── scripts/           # 通知 (notify.sh)・死活監視 (watchdog.sh)
+├── diary/             # 分析・シグナル・約定・思考トレース・日次評価の全記録 (gitignore)
+├── logs/              # デーモンログ・総資産スナップショット・障害アラート (gitignore)
 ├── docs/              # TRADING_SPEC / ARCHITECTURE_REVIEW
 └── .claude/skills/    # 開発用スキル (sync-docs 等)
 ```

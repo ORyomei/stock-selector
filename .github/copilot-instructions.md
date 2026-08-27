@@ -201,7 +201,8 @@ uv run stock-selector auto-analyze --market jp --ai --daemon
 
 デーモン関連コード（`src/agents/auto_trade.py` 等）を修正したら、**必ず以下を実行して動作確認するまで完了としない**:
 
-1. デーモン再起動、または即時実行（`uv run stock-selector auto-trade --market jp`）
+1. デーモン再起動（`sudo systemctl restart stock-selector-trader` — systemd 管理が本番経路）、
+   または即時実行（`uv run stock-selector auto-trade --market jp`）
 2. ログを確認し、新しいロジックが正常動作していることを検証
 3. エラーや想定外の動作があれば修正してやり直す
 
