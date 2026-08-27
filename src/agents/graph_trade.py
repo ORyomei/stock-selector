@@ -214,6 +214,9 @@ def _build_system_prompt(
   使い、スクリーニング段階では使わないこと
 - `submit_signals`: **シグナル提出（最終ステップ・必須）**
 {("- 枠満杯。新規候補のスコアが保有最低スコアより 5 以上高い場合のみ `action: \"swap\"` + sell_ticker で入れ替え" if available <= 0 else "")}
+- **回転抑制ルール（機械的に強制される）**: 取得から2営業日未満の銘柄は swap で売れない
+  （fail_conditions の発動を reason に明記した場合を除く）。売却から2営業日未満の銘柄は
+  買い直せない。短期の往復はスプレッドを失うだけなので、確信が持てない銘柄はそもそも買わないこと
 
 ## 出力方法 — 必読
 
@@ -957,6 +960,20 @@ def _execute_signals(
             positions = get_held_positions()
             sell_pos = next((p for p in positions if p["ticker"] == sell_ticker), None)
             if sell_pos:
+                # 回転抑制ガード (issue #11): 保有N営業日未満の swap 売りを拒否。
+                # fail_conditions 発動を明記した売りは thesis 崩壊として通す
+                from core.churn_guard import check_min_hold
+
+                reason_text = str(sig.get("reason", ""))
+                thesis_broken = "fail_condition" in reason_text or "invalidation" in reason_text
+                ok_hold, hold_msg = check_min_hold(sell_pos.get("entry_time"))
+                if not ok_hold and not thesis_broken:
+                    log(f"  🔒 swap 却下 ({sell_ticker}): {hold_msg}")
+                    executed.append(
+                        {"ticker": sell_ticker, "status": "SWAP_BLOCKED_MIN_HOLD", "score": 0}
+                    )
+                    continue
+
                 qty = sell_pos.get("quantity", 0)
                 log(f"  売り: {sell_ticker} {qty}株...")
                 out, rc = run_trade_cmd(["--close", sell_ticker, str(qty), "--source", "swap"])

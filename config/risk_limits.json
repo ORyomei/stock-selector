@@ -14,5 +14,7 @@
     "medium": 60,
     "long": 180
   },
-  "forbidden_tickers": []
+  "forbidden_tickers": [],
+  "min_hold_business_days": 2,
+  "reentry_cooldown_business_days": 2
 }

@@ -136,6 +136,19 @@ class CounterargumentGate:
             missing_fields.append("exit_plan")
             issues.append("exit_plan が不足（価格・割合など数値を含む10文字以上の撤退計画が必要）")
 
+        # 再入場クールダウン (issue #11): 直近に売却した銘柄の買い直しを拒否。
+        # 90分〜数時間の往復 (7例中5例が損失) を機械的に止める
+        ticker = str(signal.get("ticker", ""))
+        if ticker and str(signal.get("action", "buy")).lower() in ("buy", "swap"):
+            try:
+                from core.churn_guard import check_reentry
+
+                ok_reentry, reentry_msg = check_reentry(ticker)
+                if not ok_reentry:
+                    issues.append(reentry_msg + "。別の候補を検討してください")
+            except Exception:
+                pass  # ガード自体の不具合でシグナルを殺さない (安全側=許可)
+
         is_valid = len(issues) == 0
 
         summary = (
