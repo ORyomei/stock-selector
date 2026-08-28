@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from langgraph.prebuilt import create_react_agent
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SRC_DIR))
@@ -222,6 +222,8 @@ def _build_system_prompt(
 
 分析が完了したら、**最後に必ず `submit_signals` ツールを呼び出して**シグナルを提出してください。
 - **シグナルが 0 件でも `signals=[]` で必ず呼ぶこと**（無理に買わない判断も正当）
+- **価格は `stop_loss < target <= take_profit` を厳守**。`target_price` は執行の目標
+  （現在値近辺）であり、アナリスト目標株価などの上値メドは reason に書くこと
 - テキストに JSON を書くのではなく、ツール呼び出しで提出すること
 - 提出後は簡潔な分析コメント（500字以内）で回答を締めくくる
 
@@ -838,7 +840,12 @@ def _extract_signals(ai_text: str, max_signals: int) -> list[dict[str, Any]]:
 
 
 class TradeSignalArg(BaseModel):
-    """売買シグナル 1 件。"""
+    """売買シグナル 1 件。
+
+    価格関係の検証をこのスキーマで行う (issue #6)。executor まで到達してから
+    却下されると次サイクルまで執行が遅れるが、ツール境界での ValidationError は
+    エージェントに即座に差し戻され同一ターン内で修正できる。
+    """
 
     ticker: str = Field(description="ティッカー (例 7203.T)")
     action: str = Field(default="buy", description='"buy" または "swap"')
@@ -846,9 +853,18 @@ class TradeSignalArg(BaseModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     reason: str = Field(default="", description="売買根拠")
     entry_price: float = Field(default=0, description="0 = 成行")
-    target_price: float = 0
-    stop_loss_price: float = 0
-    take_profit_price: float = 0
+    target_price: float = Field(
+        default=0,
+        description=(
+            "執行の目標価格 (現在値近辺の現実的な水準)。"
+            "stop_loss_price より上、take_profit_price 以下であること。"
+            "アナリスト目標株価などの長期上値メドはここに入れず reason に書く"
+        ),
+    )
+    stop_loss_price: float = Field(default=0, description="損切り価格 (target_price より下)")
+    take_profit_price: float = Field(
+        default=0, description="利確価格 (target_price 以上)"
+    )
     timespan: str = Field(default="swing", description='"short"|"swing"|"medium"')
     fail_conditions: list[str] = Field(
         default_factory=list, description="このトレードが失敗する具体的条件"
@@ -858,6 +874,35 @@ class TradeSignalArg(BaseModel):
     )
     exit_plan: str = Field(default="", description="価格水準を含む具体的な撤退計画")
     sell_ticker: str = Field(default="", description="swap 時のみ: 売却対象ティッカー")
+
+    @model_validator(mode="after")
+    def _validate_price_relation(self) -> TradeSignalArg:
+        """executor の validation_error() と同じ制約をツール境界で先取りする。
+
+        過去19件の却下のほぼ全てが「target_price にアナリスト目標等の上値メドを
+        入れて take_profit_price を超える」という意味の取り違えだった。
+        エラーメッセージは「どう直すか」が一意に決まる文面にする。
+        """
+        act = (self.action or "buy").lower()
+        if act not in ("buy", "swap"):
+            raise ValueError(f'action は "buy" か "swap" ({act!r} は不可)')
+        if act == "swap" and not self.sell_ticker.strip():
+            raise ValueError("swap には sell_ticker (売却対象) が必須")
+
+        for name in ("target_price", "stop_loss_price", "take_profit_price"):
+            if getattr(self, name) <= 0:
+                raise ValueError(
+                    f"{name} は正の価格が必須 (0 や省略は不可)。現在値を基準に具体的な水準を設定する"
+                )
+        if not (self.stop_loss_price < self.target_price <= self.take_profit_price):
+            raise ValueError(
+                f"価格関係が不正: stop_loss({self.stop_loss_price}) < target({self.target_price}) "
+                f"<= take_profit({self.take_profit_price}) を満たすこと。"
+                "target_price は執行の目標 (現在値近辺) であり、アナリスト目標株価などの"
+                "上値メドを入れる欄ではない。上値メドは reason / exit_plan に書き、"
+                "target_price は take_profit_price 以下に修正して再提出すること"
+            )
+        return self
 
 
 class SubmitSignalsArgs(BaseModel):
