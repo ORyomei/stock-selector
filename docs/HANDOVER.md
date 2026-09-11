@@ -92,7 +92,19 @@ tail -f logs/auto_trade_daemon.log            # ログ監視
 実弾移行タイミングの判定ルールは `.claude/skills/daily-eval/SKILL.md` の
 「実弾移行タイミング評価」節（両指数の浅い方の60日DDで 待機/準備/好機圏/ナイフ）。
 
-## 7. 旧マシン (tp) の後始末
+## 7. 移行監査で見つかった漏れと対処 (2026-09-12 追記)
+
+- **CLAUDE.md を新設** — dev の新しい Claude Code セッションが文脈ゼロで始まらないよう、
+  セッション開始時の必読順 (HANDOVER → 最新 eval → open issues) と鉄則を記載
+- **dev の git identity** — user.name / user.email を tp と同一に設定済み
+- **gh CLI** — dev に ~/.local/bin へバイナリ導入済み。**認証は未** —
+  dev で `gh auth login` を実行するまで issue 運用 (作成/クローズ/コメント) が使えない
+- .env は tp に存在しなかった (NTFY_TOPIC 未設定 = スマホプッシュは元々未使用)
+- Claude Code のプロジェクトメモリ (tp 側) は空 — 移行対象なし
+- dev のタイムゾーンは Asia/Tokyo 確認済み — cron「16:11」がそのまま正しい
+- git stash / ローカルブランチ — なし (main のみ、クリーン)
+
+## 8. 旧マシン (tp) の後始末
 
 - systemd unit は disable 済み（ファイルは /etc/systemd/system に残置。
   完全削除するなら `sudo rm /etc/systemd/system/stock-selector-*` + daemon-reload）
