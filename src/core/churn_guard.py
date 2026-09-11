@@ -113,6 +113,74 @@ def recent_closes(days: int = 7) -> dict[str, datetime]:
     return out
 
 
+def same_day_ai_sold_qty(ticker: str, now: datetime | None = None) -> int:
+    """当日 (JST) に AI 判断経路 (ai_trim / ai_exit / swap) で売却済みの株数合計。
+
+    機械ストップ (mech:*) は数えない — 安全装置の執行を抑制の分母にしないため。
+    """
+    now = now or datetime.now(UTC)
+    today = now.astimezone(_JST).date()
+    total = 0
+    try:
+        paths = sorted(_TRADES_DIR.glob("*_trade.json"))[-60:]
+    except OSError:
+        return 0
+    for p in paths:
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if str(d.get("ticker", "")) != ticker:
+                continue
+            if str(d.get("action", "")).upper() != "CLOSE":
+                continue
+            if str(d.get("status", "")).upper() != "FILLED":
+                continue
+            src = str(d.get("source", ""))
+            if src.startswith("mech:"):
+                continue
+            ts = datetime.fromisoformat(str(d["timestamp"]))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=UTC)
+            if ts.astimezone(_JST).date() == today:
+                total += int(d.get("quantity", 0) or 0)
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError):
+            continue
+    return total
+
+
+def check_ai_sell(
+    entry_time: str | datetime | None,
+    ticker: str,
+    sell_qty: int,
+    held_qty: int,
+    now: datetime | None = None,
+    min_bdays: int | None = None,
+    max_same_day_frac: float = 0.5,
+) -> tuple[bool, str]:
+    """AI 判断の売り (trim / exit / swap) を許可してよいか。(ok, 理由) を返す。
+
+    trim 連射による最低保有ガードの迂回 (issue #13) を塞ぐ:
+    最低保有期間内のポジションは、当日の AI 売り合算が建玉の
+    max_same_day_frac (既定50%) を超える分を拒否する。
+    - 全量 exit / swap 売りは合算に関係なく check_min_hold と同じ判定
+    - 機械ストップは呼び出し側でこのガードを通さないこと (無条件即時)
+    """
+    ok_hold, hold_msg = check_min_hold(entry_time, now=now, min_bdays=min_bdays)
+    if ok_hold:
+        return True, hold_msg  # 最低保有を満たしていれば trim も exit も自由
+
+    # 最低保有期間内: 当日合算で 50% までの部分縮小のみ許す
+    base = held_qty + same_day_ai_sold_qty(ticker, now=now)  # 当日開始時点の建玉を復元
+    already = same_day_ai_sold_qty(ticker, now=now)
+    allowed = int(base * max_same_day_frac)
+    if already + sell_qty > allowed:
+        return False, (
+            f"{hold_msg}。当日のAI売り合算 {already + sell_qty}/{base}株 が "
+            f"上限{int(max_same_day_frac * 100)}% ({allowed}株) を超過 — trim 連射による"
+            "最低保有ガードの迂回は不可 (issue #13)。機械ストップは対象外"
+        )
+    return True, f"{hold_msg} (部分縮小 {already + sell_qty}/{base}株 は50%以内で許可)"
+
+
 def check_reentry(
     ticker: str,
     now: datetime | None = None,

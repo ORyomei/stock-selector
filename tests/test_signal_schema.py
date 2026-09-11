@@ -63,3 +63,21 @@ def test_swap_with_sell_ticker_passes():
 def test_invalid_action_rejected():
     with pytest.raises(ValidationError, match="action"):
         _sig(action="sell")
+
+
+def test_self_contradiction_high_confidence_rejected():
+    """issue #14: fail_conditions に短期矛盾を自書きした高確信度エントリーを拒否。"""
+    with pytest.raises(ValidationError, match="自己矛盾"):
+        _sig(
+            confidence=0.65,
+            fail_conditions=["BB上限超えからの反落リスク、出来高伴わない急騰の失敗"],
+        )
+
+
+def test_self_contradiction_low_confidence_allowed():
+    """同じ fail_conditions でも confidence < 0.6 なら通す (認識した上での小口)。"""
+    s = _sig(
+        confidence=0.5,
+        fail_conditions=["BB上限超えからの反落リスク"],
+    )
+    assert s.confidence == 0.5

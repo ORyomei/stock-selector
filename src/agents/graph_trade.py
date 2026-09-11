@@ -217,6 +217,9 @@ def _build_system_prompt(
 - **回転抑制ルール（機械的に強制される）**: 取得から2営業日未満の銘柄は swap で売れない
   （fail_conditions の発動を reason に明記した場合を除く）。売却から2営業日未満の銘柄は
   買い直せない。短期の往復はスプレッドを失うだけなので、確信が持てない銘柄はそもそも買わないこと
+- **入口の原則**: fail_conditions に「BB上限超え・RSI過熱・出来高薄」のような
+  **翌日にも発動しうる短期矛盾**を書く銘柄は、買わずに押し目を待つこと。
+  この型のエントリーは過去5件全て翌日撤退で計 -78,170円（確信度 0.6 以上では機械的に却下される）
 
 ## 出力方法 — 必読
 
@@ -329,6 +332,17 @@ def _run_ai_exit_advisor(
                     continue
             else:  # exit
                 qty = held_qty
+
+            # trim 連射による最低保有ガード迂回の封鎖 (issue #13)。
+            # 最低保有期間内は当日AI売り合算50%まで。機械ストップはこの経路を通らない
+            from core.churn_guard import check_ai_sell
+
+            ok_sell, sell_msg = check_ai_sell(
+                pos.entry_time, ticker, qty, held_qty
+            )
+            if not ok_sell:
+                log(f"  🔒 AI{a['action']} 却下 ({ticker}): {sell_msg}")
+                continue
 
             if dry_run:
                 log(f"  [DRY] AI{a['action']}: {ticker} {qty}株 — {a['reason']}")
@@ -901,6 +915,23 @@ class TradeSignalArg(BaseModel):
                 "target_price は執行の目標 (現在値近辺) であり、アナリスト目標株価などの"
                 "上値メドを入れる欄ではない。上値メドは reason / exit_plan に書き、"
                 "target_price は take_profit_price 以下に修正して再提出すること"
+            )
+
+        # 入口の自己矛盾チェック (issue #14): fail_conditions に短期テクニカル矛盾
+        # (過熱・出来高薄) を自書きしながら高確信度で買うパターンが、9月の負けの
+        # ほぼ全て (エントリー翌日に自書き条件が発動して撤退、5件で -78k)。
+        _SHORT_TERM_RISK_KWS = (
+            "BB上限", "ボリンジャー上限", "バンド上限超", "RSI過熱", "RSI高水準",
+            "出来高伴わない", "出来高薄", "出来高不足", "過熱", "急騰後の反落",
+        )
+        joined = " ".join(self.fail_conditions)
+        hits = [kw for kw in _SHORT_TERM_RISK_KWS if kw in joined]
+        if hits and self.confidence >= 0.6:
+            raise ValueError(
+                f"自己矛盾: fail_conditions に短期テクニカル矛盾 ({'/'.join(hits[:3])}) を"
+                f"記載しながら confidence {self.confidence} は高すぎる。"
+                "この条件は翌日にも発動しうる (過去実績: 同型5件で計-78,170円)。"
+                "confidence を 0.5 未満に下げるか、条件が解消する押し目まで見送ること"
             )
         return self
 
