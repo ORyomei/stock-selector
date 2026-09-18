@@ -35,7 +35,10 @@ ds = dd.daemon_status()
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("デーモン", "稼働中 🟢" if ds["running"] else "停止 🔴", help=f"PID={ds['pid']}")
 c2.metric("ブローカー", ds["broker"])
-c3.metric("東証", "場中 🟢" if ds["jp_market_open"] else "時間外 🔴")
+_jp_reason = str(ds.get("jp_skip_reason") or "")
+c3.metric("東証", "場中 🟢" if ds["jp_market_open"]
+          else ("休場 🔴" if _jp_reason.startswith("休場日") else "時間外 🔴"),
+          help=_jp_reason or "取引時間内")
 c4.metric("AI手仕舞い", "ON" if ds["ai_exit"] else "OFF")
 c5.metric("振り返り学習", "ON" if ds["ai_reflection"] else "OFF")
 if ds.get("last_cycle"):

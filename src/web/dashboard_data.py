@@ -76,7 +76,8 @@ def _tail(path: Path, n: int) -> list[str]:
 def daemon_status() -> dict[str, Any]:
     out: dict[str, Any] = {"running": False, "pid": None, "broker": "?",
                            "ai_exit": False, "ai_reflection": False,
-                           "jp_market_open": None, "running_since": None, "last_cycle": None}
+                           "jp_market_open": None, "jp_skip_reason": None,
+                           "running_since": None, "last_cycle": None}
     try:
         if LOCK_FILE.exists():
             pid = int(LOCK_FILE.read_text().strip() or 0)
@@ -99,9 +100,11 @@ def daemon_status() -> dict[str, Any]:
     except Exception:
         pass
     try:
-        from agents.auto_trade import _should_skip_cycle
+        from agents.auto_trade import _skip_reason
 
-        out["jp_market_open"] = not _should_skip_cycle("jp")
+        reason = _skip_reason("jp")
+        out["jp_market_open"] = reason is None
+        out["jp_skip_reason"] = reason
     except Exception:
         pass
     # 最新サイクル行

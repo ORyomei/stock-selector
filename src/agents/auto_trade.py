@@ -18,9 +18,11 @@ import os
 import signal
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+import jpholiday
 
 # --- paths ----------------------------------------------------------------
 
@@ -170,33 +172,58 @@ def _reconcile_if_needed(log) -> None:
 # ── daemon ────────────────────────────────────────────────────────────────────
 
 
-def _should_skip_cycle(market: str) -> bool:
-    """取引時間外ならTrue。東証 8:30-16:00 / 米国 22:00-06:00 JST (余裕込み)."""
-    JST = timezone(timedelta(hours=9))
-    now = datetime.now(JST)
+def _is_jp_market_holiday(d: date) -> str | None:
+    """東証の休場日なら理由 (祝日名 / 年末年始)、営業日なら None。週末は呼び出し側で判定。
+
+    祝日は jpholiday (振替休日・国民の休日を含む)。年末年始は 12/31 (大納会翌日) と
+    1/1〜1/3 を固定で休場扱い (issue #18: 8/11 山の日に 14 サイクルが休場市場へ空転した)。
+    """
+    if d.month == 12 and d.day == 31:
+        return "年末休場"
+    if d.month == 1 and d.day <= 3:
+        return "年始休場"
+    return jpholiday.is_holiday_name(d)
+
+
+def _skip_reason(market: str, now: datetime | None = None) -> str | None:
+    """サイクルをスキップすべき理由 ('取引時間外' / '休場日 (敬老の日)')。稼働すべきなら None。
+
+    東証 8:30-16:00 / 米国 22:00-06:00 JST (余裕込み)。東証は祝日・年末年始も休場。
+    米国市場の祝日は未対応 (--market jp 運用中)。`now` はテスト用に注入可能。
+    """
+    now = now.astimezone(JST) if now is not None else datetime.now(JST)
     weekday = now.weekday()  # 0=Mon ... 6=Sun
-    hour = now.hour
-    minute = now.minute
-    t = hour * 60 + minute
+    t = now.hour * 60 + now.minute
 
     jp_open = 8 * 60 + 30   # 08:30
     jp_close = 16 * 60       # 16:00
     us_open = 22 * 60        # 22:00 (JST)
     us_close = 6 * 60        # 06:00 (JST, 翌朝)
 
-    # 東証: 月〜金 08:30-16:00 JST
-    jp_active = weekday <= 4 and jp_open <= t <= jp_close
+    # 東証: 月〜金 08:30-16:00 JST、祝日・年末年始を除く
+    jp_hours = weekday <= 4 and jp_open <= t <= jp_close
+    jp_holiday = _is_jp_market_holiday(now.date()) if jp_hours else None
+    jp_active = jp_hours and jp_holiday is None
     # 米国: 現地月〜金 = JST 月〜金 22:00〜 / 火〜土 〜06:00 (翌朝に跨ぐ)
     # ※月曜 00:00-06:00 JST は米国日曜のため休場、土曜早朝は金曜セッション継続中
     us_active = (weekday <= 4 and t >= us_open) or (1 <= weekday <= 5 and t <= us_close)
 
     if market == "jp":
-        return not jp_active
+        active = jp_active
     elif market == "us":
-        return not us_active
-    else:  # "all"
-        # 日本か米国どちらかが開いていればOK
-        return not (jp_active or us_active)
+        active = us_active
+    else:  # "all": 日本か米国どちらかが開いていればOK
+        active = jp_active or us_active
+    if active:
+        return None
+    if jp_holiday and market != "us":
+        return f"休場日 ({jp_holiday})"
+    return "取引時間外"
+
+
+def _should_skip_cycle(market: str, now: datetime | None = None) -> bool:
+    """取引時間外・休場日なら True。理由が要る場合は _skip_reason を使う。"""
+    return _skip_reason(market, now) is not None
 
 
 def daemon_loop(
@@ -237,10 +264,11 @@ def daemon_loop(
     while True:
         cycle += 1
 
-        # 取引時間外スキップ
-        if _should_skip_cycle(market):
+        # 取引時間外・休場日スキップ (理由をログに残す: daily-eval が読む)
+        skip = _skip_reason(market)
+        if skip:
             now_jst = datetime.now(JST)
-            print(f"\n### サイクル #{cycle} [SKIP] {now_jst.strftime('%H:%M')} JST — 取引時間外 ###")
+            print(f"\n### サイクル #{cycle} [SKIP] {now_jst.strftime('%H:%M')} JST — {skip} ###")
             try:
                 time.sleep(interval)
             except KeyboardInterrupt:

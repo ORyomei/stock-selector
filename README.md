@@ -131,7 +131,7 @@ uv run stock-selector auto-trade --market jp --dry-run  # ドライラン（注�
 ```
 
 - ログ: `logs/auto_trade_daemon.log`、二重起動防止: `.auto_trade.lock`（systemd と手動は排他）
-- 取引時間外（東証 8:30–16:00 / 米国 22:00–翌6:00 JST 以外）のサイクルは自動 SKIP
+- 取引時間外（東証 8:30–16:00 / 米国 22:00–翌6:00 JST 以外）と東証の休場日（祝日・振替休日・国民の休日・12/31・1/1〜1/3、`jpholiday` で判定）のサイクルは自動 SKIP。ログに `[SKIP] … — 取引時間外` / `休場日 (敬老の日)` と理由を残す（米国市場の祝日は未対応）
 - 主なオプション: `--market us|jp|all`（既定 `jp`）、`--min-score`、`--max-signals`、`--ai-provider`、`--ai-model`
 
 ## ダッシュボード（Streamlit・読み取り専用）
