@@ -140,6 +140,7 @@ def _build_system_prompt(
     lessons: str = "",
     hard_stats: str = "",
     max_unit_cost_jpy: float | None = None,
+    event_digest: str = "",
 ) -> str:
     """Build the system prompt with current portfolio + market-regime context."""
     held = get_held_tickers()
@@ -302,7 +303,7 @@ def _build_system_prompt(
 
 ## 🌐 市場シナリオ: {scen_label} ({scenario})
 {scen_desc}
-{lessons_block}{hard_stats_block}
+{lessons_block}{hard_stats_block}{event_digest}
 ## ポートフォリオ状況
 - ポジション: {cur_pos}/{max_pos} (空き: {available})
 - 保有銘柄:
@@ -344,6 +345,9 @@ def _build_system_prompt(
 
 分析が完了したら、**最後に必ず `submit_signals` ツールを呼び出して**シグナルを提出してください。
 - **シグナルが 0 件でも `signals=[]` で必ず呼ぶこと**（無理に買わない判断も正当）
+- **却下理由はツール応答で返る**（入口ゲート・ユニバース外・1 銘柄上限・現金下限・セクター上限・
+  片肺 swap・分散チェック）。却下されたら同じ銘柄を言い換えて再提出せず、別候補を検討して
+  受理済み分も含めて全件を再提出すること
 - **価格は `stop_loss < target <= take_profit` を厳守**。`target_price` は執行の目標
   （現在値近辺）であり、アナリスト目標株価などの上値メドは reason に書くこと
 - テキストに JSON を書くのではなく、ツール呼び出しで提出すること
@@ -611,6 +615,22 @@ def _reflect_if_enabled(provider: str, model: str | None, log: Any) -> str:
 # Core graph execution
 # ---------------------------------------------------------------------------
 
+def _event_digest_safe(log: Any) -> str:
+    """通過した重要イベントの事後評価ブロック (issue #24)。失敗時は空。"""
+    try:
+        from core.event_digest import prompt_block
+
+        block = prompt_block()
+        if block:
+            log("  -> 通過イベントの事後評価をプロンプトに注入:")
+            for line in block.strip().splitlines()[1:-1]:
+                log(f"     {line}")
+        return block
+    except Exception as e:
+        print(f"⚠️  event digest skipped: {e}", file=sys.stderr)
+        return ""
+
+
 def _hard_stats_safe() -> str:
     """実測期待値のプロンプト注入テキスト。失敗時は空 (プロンプトに足さない)。"""
     try:
@@ -861,10 +881,11 @@ def run_trade_graph(
         market, min_score, max_signals, dry_run,
         scenario=scenario, scenarios_cfg=scenarios_cfg, lessons=lessons,
         hard_stats=_hard_stats_safe(), max_unit_cost_jpy=_max_unit_cost_jpy_safe(),
+        event_digest=_event_digest_safe(log),
     )
     # シグナル提出は構造化ツール経由 (スキーマ強制でフィールド欠落を根絶)
     captured: dict[str, Any] = {}
-    submit_tool = _make_submit_signals_tool(captured)
+    submit_tool = _make_submit_signals_tool(captured, provider=provider, model=model)
 
     user_msg = (
         f"現在 {now:%Y-%m-%d %H:%M} JST です。"
@@ -959,9 +980,9 @@ def run_trade_graph(
         # 構造化ツール経由 (主経路): スキーマ検証 + 入口ゲート済みなので正規化のみ
         log(f"  -> submit_signals ツール経由で受理 ({len(tool_signals)} 件)")
         signals = _normalize_signals(tool_signals, max_signals)
-        for t, msg in captured.get("entry_gate_rejected") or []:
+        for t, msg in captured.get("submit_rejected") or []:
             log(f"  ❌ {t}: {msg}")
-            rejected.append({"ticker": t, "_gate_rejection_reason": f"entry_gate: {msg}"})
+            rejected.append({"ticker": t, "_gate_rejection_reason": f"submit: {msg}"})
     else:
         # フォールバック: ツール未呼び出し時はテキストから JSON を抽出
         signals = _extract_signals(final_text, max_signals)
@@ -1032,8 +1053,9 @@ def run_trade_graph(
         signals = valid_sigs
         rejected = rejected + invalid_sigs
 
-    # Step 3.55: ポートフォリオ単位の AI 推論 — セクター/テーマ過集中を抑制 (機械的上限に加える定性チェック)
-    if signals:
+    # Step 3.55: ポートフォリオ単位の AI 推論 — セクター/テーマ過集中を抑制 (機械的上限に加える定性チェック)。
+    #   主経路では submit_signals 内で実施済み (却下をエージェントに返すため)。ここはフォールバック経路用
+    if signals and not captured.get("reviewed"):
         from agents.portfolio_review import review_portfolio
 
         log("\nStep 3.55: ポートフォリオ分散チェック (AI)...")
@@ -1236,7 +1258,80 @@ class SubmitSignalsArgs(BaseModel):
     market_comment: str = Field(default="", description="市場環境の概要と判断理由")
 
 
-def _make_submit_signals_tool(captured: dict[str, Any]) -> Any:
+def _preflight_safe(sig: dict[str, Any]) -> tuple[bool, str]:
+    """submit 時の執行可能性の事前検査 (issue #24 (1) / #16)。却下理由をツール応答で返すため。
+
+    ユニバース外・1 銘柄上限・現金下限・セクター上限・swap の片肺を、注文実行と同じ関数で
+    先に見る。判定不能は通す (執行段階が最終防衛線)。
+    """
+    try:
+        from core.screener import JP_UNIVERSE, US_UNIVERSE
+
+        ticker = str(sig.get("ticker", ""))
+        if ticker not in set(JP_UNIVERSE + US_UNIVERSE):
+            return False, "執行ユニバース外 (core/screener.py の JP_UNIVERSE に無い銘柄は執行されない。別候補を検討)"
+        limits = _sizing_limits()
+        sell_ticker = str(sig.get("sell_ticker") or "")
+        if sell_ticker:
+            sell_pos = next((p for p in get_held_positions() if p["ticker"] == sell_ticker), None)
+            if sell_pos is None:
+                return False, f"swap の売却対象 {sell_ticker} を保有していない"
+            ok, msg = _swap_feasible(sig, sell_pos, limits)
+            if not ok:
+                return False, msg
+            return _sector_cap_ok(sig, limits, exclude_ticker=sell_ticker)
+        est_price = float(sig.get("target_price") or 0)
+        if est_price > 0:
+            from agents.auto_trade import _cash_by_currency, _order_cost
+            from agents.portfolio_helpers import USD_JPY_APPROX, total_equity_jpy
+            from core.sizing import cash_floor_check
+
+            ccy, _unit, est_cost = _order_cost(ticker, est_price)
+            est_jpy = est_cost if ccy == "JPY" else est_cost * USD_JPY_APPROX
+            equity = total_equity_jpy()
+            cap = equity * limits["max_position_size_pct"] / 100
+            if cap > 0 and est_jpy > cap:
+                return False, (
+                    f"1 単元 ¥{est_jpy:,.0f} が 1 銘柄上限 ¥{cap:,.0f} "
+                    f"({limits['max_position_size_pct']:.0f}%) 超 — 執行されない"
+                )
+            cash = _cash_by_currency(get_container().broker().get_balance())
+            cash_jpy = cash["JPY"] + cash["USD"] * USD_JPY_APPROX
+            ok, msg = cash_floor_check(cash_jpy, est_jpy, equity, limits["min_cash_pct"])
+            if not ok:
+                return False, msg + " — 新規買いは執行されない (swap で現金を作るか見送り)"
+        return _sector_cap_ok(sig, limits)
+    except Exception as e:
+        print(f"⚠️  submit preflight skipped: {e}", file=sys.stderr)
+        return True, f"事前検査不能のため通過: {e}"
+
+
+def _review_submitted_safe(
+    accepted: list[dict[str, Any]], provider: str, model: str | None
+) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
+    """ポートフォリオ分散チェック (AI) を submit 内で行い、除外をエージェントに返せるようにする。"""
+    try:
+        from agents.portfolio_review import review_portfolio
+
+        notes: list[str] = []
+        kept = review_portfolio(accepted, provider=provider, model=model, log=notes.append)
+        kept_t = {str(k.get("ticker")) for k in kept}
+        drops: list[tuple[str, str]] = []
+        for d in accepted:
+            t = str(d.get("ticker"))
+            if t in kept_t:
+                continue
+            why = next((n.split("—", 1)[-1].strip() for n in notes if t in n and "除外" in n), "過集中")
+            drops.append((t, f"ポートフォリオ分散チェック (AI) で除外: {why}"))
+        return [d for d in accepted if str(d.get("ticker")) in kept_t], drops
+    except Exception as e:
+        print(f"⚠️  submit review skipped: {e}", file=sys.stderr)
+        return accepted, []
+
+
+def _make_submit_signals_tool(
+    captured: dict[str, Any], provider: str = "claude_code", model: str | None = None
+) -> Any:
     """シグナル提出用の構造化ツールを生成する。
 
     エージェントの最終出力をテキスト JSON ではなくツール呼び出しにすることで、
@@ -1248,27 +1343,36 @@ def _make_submit_signals_tool(captured: dict[str, Any]) -> Any:
     from langchain_core.tools import StructuredTool
 
     def _submit(signals: list[TradeSignalArg], market_comment: str = "") -> str:
-        # 入口の測定値ゲート (issue #20): 自己申告ではなく score_stock の実測で検査し、
-        # 却下はこのツール応答でエージェントに即時に返す (同一ターン内で別候補を検討できる)
+        # 却下は全てこのツール応答でエージェントに即時に返す (同一ターン内で別候補を検討できる。
+        # issue #24: 従来はユニバース外 22 回・分散 32 回・資金不足 15 回がログにしか出なかった)
+        #   1) 入口の測定値ゲート (#20)  2) 執行可能性の事前検査 (#16/#21)  3) 分散チェック (AI)
         accepted: list[dict[str, Any]] = []
         rejected: list[tuple[str, str]] = []
         for sig in signals:
-            ok, msg, measured = _evaluate_entry_safe(sig.ticker)
             d = sig.model_dump()
+            ok, msg, measured = _evaluate_entry_safe(sig.ticker)
             d["_entry_measured"] = measured
             d["_entry_gate"] = msg
-            if ok:
-                accepted.append(d)
-            else:
+            if not ok:
                 rejected.append((sig.ticker, msg))
+                continue
+            ok2, msg2 = _preflight_safe(d)
+            if not ok2:
+                rejected.append((sig.ticker, msg2))
+                continue
+            accepted.append(d)
+        if accepted:
+            accepted, drops = _review_submitted_safe(accepted, provider, model)
+            rejected.extend(drops)
+            captured["reviewed"] = True
         captured["signals"] = accepted
         captured["market_comment"] = market_comment
-        captured["entry_gate_rejected"] = rejected
+        captured["submit_rejected"] = rejected
         if rejected:
             detail = "; ".join(f"{t}: {m}" for t, m in rejected)
             return (
-                f"{len(accepted)} 件受理、{len(rejected)} 件を入口ゲートで却下 — {detail}。"
-                "却下銘柄は測定値が条件を満たすまで提出不可 (confidence や文面を変えても通らない)。"
+                f"{len(accepted)} 件受理、{len(rejected)} 件却下 — {detail}。"
+                "却下銘柄は条件が解消するまで提出不可 (confidence や文面を変えても通らない)。"
                 "別候補があれば受理済み分も含めて全件を再提出し、なければ簡潔な分析コメントで回答を終えること"
             )
         return f"{len(signals)} 件のシグナルを受理しました。簡潔な分析コメントで回答を終えてください。"

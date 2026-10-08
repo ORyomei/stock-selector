@@ -111,3 +111,52 @@ def test_buy_passes_all_guards_with_full_size(harness):
     out = gt._execute_signals([sig], dry_run=False, log=lambda m: None)
     assert out[0]["status"] == "FILLED" and out[0]["measured"] == {"annualized_vol_pct": 25.0}
     assert harness["saved"][0]["size_factor"] == 1.0
+
+
+# ── submit 時の事前検査 (issue #24 (1) / #16): 却下理由をツール応答で返す ──
+
+
+def test_preflight_rejects_out_of_universe(harness):
+    ok, msg = gt._preflight_safe({"ticker": "1545.T", "target_price": 4000.0})
+    assert ok is False and "ユニバース外" in msg
+
+
+def test_preflight_rejects_cash_floor_breach(harness):
+    harness.update(cash=500_000.0, sectors={"6501.T": "Industrials"})
+    ok, msg = gt._preflight_safe({"ticker": "6501.T", "target_price": 5000.0})
+    assert ok is False and "下限 20%" in msg and "執行されない" in msg
+
+
+def test_preflight_rejects_unit_cost_over_position_cap(harness):
+    harness.update(cash=2_000_000.0, sectors={"8035.T": "Technology"})
+    ok, msg = gt._preflight_safe({"ticker": "8035.T", "target_price": 30000.0})  # 1 単元 300 万 > 60 万
+    assert ok is False and "1 銘柄上限" in msg
+
+
+def test_preflight_rejects_swap_with_unheld_sell_ticker(harness):
+    ok, msg = gt._preflight_safe({"ticker": "6501.T", "sell_ticker": "9999.T", "target_price": 5000.0})
+    assert ok is False and "保有していない" in msg
+
+
+def test_preflight_passes_feasible_buy(harness):
+    harness.update(cash=1_500_000.0, sectors={"6501.T": "Industrials"})
+    ok, msg = gt._preflight_safe({"ticker": "6501.T", "target_price": 5000.0})
+    assert ok is True and "セクター" in msg
+
+
+def test_submit_runs_preflight_and_review_and_reports_all(harness, monkeypatch):
+    """入口ゲート → 事前検査 → 分散チェックの却下が 1 つの応答にまとまり、受理分だけ captured に残る。"""
+    monkeypatch.setattr(gt, "_evaluate_entry_safe", lambda t: (t != "7203.T", "gate", None))
+    monkeypatch.setattr(gt, "_preflight_safe", lambda d: (d["ticker"] != "1545.T", "pre"))
+    monkeypatch.setattr(gt, "_review_submitted_safe",
+                        lambda acc, p, m: ([a for a in acc if a["ticker"] != "6758.T"], [("6758.T", "分散で除外")]))
+    captured: dict = {}
+    tool = gt._make_submit_signals_tool(captured)
+    base = dict(action="buy", target_price=100.0, stop_loss_price=95.0, take_profit_price=110.0,
+                invalidation_rules=[{"metric": "rsi_14", "op": "<", "value": 45}])
+    out = tool.invoke({"signals": [{"ticker": t, **base} for t in ("7203.T", "1545.T", "6758.T", "6501.T")]})
+    assert "1 件受理、3 件却下" in out
+    assert [s["ticker"] for s in captured["signals"]] == ["6501.T"]
+    assert [t for t, _ in captured["submit_rejected"]] == ["7203.T", "1545.T", "6758.T"]
+    assert captured["reviewed"] is True
+

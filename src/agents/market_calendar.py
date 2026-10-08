@@ -166,6 +166,13 @@ def run_market_calendar(
     result["ai"] = ai_meta
     if ai_meta["used"]:  # 成功時のみキャッシュ (失敗を3時間固定しない)
         _cache_save(result, now)
+        # 通過後の事後評価 (issue #24) 用に履歴へ残す。カレンダーは未来しか持たないため
+        try:
+            from core.event_digest import record_events
+
+            record_events(result.get("events") or [])
+        except Exception as e:
+            print(f"⚠️  event history skipped: {e}", file=sys.stderr)
     return result
 
 

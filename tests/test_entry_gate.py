@@ -135,6 +135,8 @@ def test_submit_tool_rejects_and_reports_in_same_turn(monkeypatch):
         "6702.T": (False, "入口ゲート却下 (BB位置 92% > 85%, RSI 71 > 65)", {"bb_position_pct": 92.0}),
     }
     monkeypatch.setattr(gt, "_evaluate_entry_safe", lambda t: verdicts[t])
+    monkeypatch.setattr(gt, "_preflight_safe", lambda d: (True, "ok"))
+    monkeypatch.setattr(gt, "_review_submitted_safe", lambda acc, p, m: (acc, []))
     captured: dict = {}
     tool = gt._make_submit_signals_tool(captured)
     base = dict(action="buy", score=30, confidence=0.6, target_price=100.0,
@@ -142,7 +144,7 @@ def test_submit_tool_rejects_and_reports_in_same_turn(monkeypatch):
                 invalidation_rules=[{"metric": "rsi_14", "op": "<", "value": 45}])
     out = tool.invoke({"signals": [{"ticker": "7203.T", **base}, {"ticker": "6702.T", **base}],
                        "market_comment": "x"})
-    assert "1 件受理、1 件を入口ゲートで却下" in out and "6702.T" in out
+    assert "1 件受理、1 件却下" in out and "6702.T" in out
     assert [s["ticker"] for s in captured["signals"]] == ["7203.T"]
     assert captured["signals"][0]["_entry_measured"] == {"bb_position_pct": 60.0}
-    assert captured["entry_gate_rejected"] == [("6702.T", verdicts["6702.T"][1])]
+    assert captured["submit_rejected"] == [("6702.T", verdicts["6702.T"][1])]

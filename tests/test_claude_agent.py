@@ -58,6 +58,8 @@ def test_submit_signals_pydantic_enforced_through_sdk(monkeypatch):
 
     # 入口の測定値ゲート (#20) は実データを測るので、ここでは通過に固定する
     monkeypatch.setattr(gt, "_evaluate_entry_safe", lambda t: (True, "stub", None))
+    monkeypatch.setattr(gt, "_preflight_safe", lambda d: (True, "stub"))
+    monkeypatch.setattr(gt, "_review_submitted_safe", lambda acc, p, m: (acc, []))
     captured: dict = {}
     sdk_t = lc_tool_to_sdk(_make_submit_signals_tool(captured))
 

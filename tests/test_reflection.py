@@ -73,7 +73,7 @@ def test_reflect_skips_when_too_few(monkeypatch):
 
 
 def test_reflect_caches_when_no_new_close(monkeypatch):
-    """同じクローズ集合なら2回目は LLM を呼ばずキャッシュ再利用。"""
+    """同じクローズ集合なら2回目は LLM を呼ばない。戻り値は常に空 (自由文を注入しない、#24)。"""
     rf._cache["key"] = ""
     rf._cache["lessons"] = ""
     trades = [
@@ -82,9 +82,38 @@ def test_reflect_caches_when_no_new_close(monkeypatch):
         {"action": "CLOSE", "ticker": "C.T", "pnl": 30, "reason": "tp", "timestamp": "2026-06-09T00:00:00"},
     ]
     _patch_trades(monkeypatch, trades)
-    calls = []
-    monkeypatch.setattr(rf, "call_ai", lambda *a, **k: calls.append(1) or "教訓: テスト")
+    calls, recorded = [], []
+    monkeypatch.setattr(rf, "call_ai", lambda *a, **k: calls.append(1) or (
+        '{"proposals": [{"param": "default_stop_loss_pct", "current": 3, "proposed": 4, "evidence": "e"}]}'
+    ))
+    monkeypatch.setattr(rf, "_record_proposals", lambda props, stats: recorded.append(props))
     first = rf.reflect_on_history()
     second = rf.reflect_on_history()
-    assert first == second == "教訓: テスト"
+    assert first == second == ""
     assert len(calls) == 1  # 2回目はキャッシュ
+    assert recorded == [[{"param": "default_stop_loss_pct", "current": 3.0, "proposed": 4.0, "evidence": "e"}]]
+
+
+# ── issue #24: 自由文の教訓ではなく数値パラメータ提案 ─────────────────
+
+
+def test_parse_proposals_keeps_only_allowed_numeric_params():
+    text = """```json
+    {"proposals": [
+      {"param": "default_stop_loss_pct", "current": 3, "proposed": "4", "evidence": "stop 12 件の売却後 5 日中央値 -1.8%"},
+      {"param": "vibes", "current": 1, "proposed": 2, "evidence": "x"},
+      {"param": "entry_gate.min_score", "current": "abc", "proposed": 45, "evidence": "y"},
+      {"param": "min_cash_pct", "current": 20, "proposed": 25, "evidence": "z"},
+      {"param": "max_sector_pct", "current": 35, "proposed": 30, "evidence": "w"},
+      {"param": "entry_gate.max_rsi", "current": 65, "proposed": 60, "evidence": "有効 4 件目は捨てる"}
+    ]}
+    ```"""
+    out = rf._parse_proposals(text)
+    assert [p["param"] for p in out] == ["default_stop_loss_pct", "min_cash_pct", "max_sector_pct"]
+    assert out[0]["proposed"] == 4.0 and out[0]["evidence"].startswith("stop 12")
+
+
+def test_parse_proposals_empty_on_garbage():
+    assert rf._parse_proposals("教訓: 損切りを早く") == []
+    assert rf._parse_proposals(None) == []
+
