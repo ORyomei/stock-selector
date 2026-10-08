@@ -395,9 +395,12 @@ def index_overlay(ttl_sec: int = 900) -> dict[str, list[list[Any]]]:
     return out
 
 
-def equity_history(limit: int = 2000) -> list[dict[str, Any]]:
-    """デーモンが蓄積する総資産スナップショット (logs/equity_history.jsonl)。"""
-    path = PROJECT_DIR / "logs" / "equity_history.jsonl"
+def equity_history(limit: int = 2000, path: Path | None = None) -> list[dict[str, Any]]:
+    """デーモンが蓄積する総資産スナップショット (logs/equity_history.jsonl)。
+
+    path を渡すと並走ベンチマーク (logs/equity_history_rules.jsonl) など同形式の別系列を読む。
+    """
+    path = path or PROJECT_DIR / "logs" / "equity_history.jsonl"
     if not path.exists():
         return []
     records: list[dict[str, Any]] = []
@@ -1073,3 +1076,89 @@ def ai_insights() -> dict[str, Any]:
         if "🤖 AI手仕舞い助言" in s or "AIexit" in s or "AItrim" in s:
             exits.append(s)
     return {"lessons": lessons[-12:], "exit_advisories": exits[-8:]}
+
+
+# ── 並走ベンチマーク (issue #24): LLM vs ルールのみ vs TOPIX 買持 ─────────
+
+
+def rulebook_status() -> dict[str, Any]:
+    """ルール帳簿の状態 (logs/rulebook_state.json)。無ければ started=None。"""
+    try:
+        from core.rulebook import load_state
+
+        st = load_state() or {}
+    except Exception:
+        st = {}
+    return {
+        "started": st.get("started"),
+        "cash_jpy": st.get("cash"),
+        "positions": st.get("positions") or {},
+        "last_decision_date": st.get("last_decision_date"),
+    }
+
+
+def _cum_pct_since(hist: list[dict[str, Any]], since: str) -> tuple[float | None, list[list[Any]]]:
+    """since (YYYY-MM-DD) 以降の最初の点を基準にした累計 % と、[x, %] の系列。"""
+    pts = [h for h in hist if str(h["x"])[:10] >= since]
+    if len(pts) < 1 or not pts[0]["equity_jpy"]:
+        return None, []
+    base = float(pts[0]["equity_jpy"])
+    series = [[h["x"], round((float(h["equity_jpy"]) / base - 1) * 100, 2)] for h in pts]
+    return series[-1][1], series
+
+
+def parallel_benchmark(ttl_sec: int = 300) -> dict[str, Any]:
+    """ルール帳簿の稼働開始日を基準に、LLM 帳簿 / ルール帳簿 / TOPIX 買持の累計 % を揃える。"""
+    import time
+
+    hit = _bench_cache.get("parallel")
+    if hit and time.time() - hit[0] < ttl_sec:
+        return hit[1]
+    rb = rulebook_status()
+    since = rb.get("started")
+    out: dict[str, Any] = {"since": since, "llm": None, "rules": None, "topix": None, "series": {}}
+    if since:
+        llm_pct, llm_series = _cum_pct_since(equity_history(), since)
+        rules_pct, rules_series = _cum_pct_since(
+            equity_history(path=PROJECT_DIR / "logs" / "equity_history_rules.jsonl"), since
+        )
+        out["llm"], out["rules"] = llm_pct, rules_pct
+        out["series"] = {"LLM": llm_series, "ルールのみ": rules_series}
+        try:
+            import yfinance as yf
+
+            closes = yf.Ticker("1306.T").history(period="3mo")["Close"].dropna()
+            med = float(closes.median())
+            closes = closes[(closes > med / 3) & (closes < med * 3)]
+            closes = closes[closes.index >= since]
+            if len(closes) >= 1:
+                base = float(closes.iloc[0])
+                series = [
+                    [f"{idx.strftime('%Y-%m-%d')} 15:00:00", round((float(v) / base - 1) * 100, 2)]
+                    for idx, v in closes.items()
+                ]
+                out["topix"] = series[-1][1]
+                out["series"]["TOPIX 買持"] = series
+        except Exception:
+            pass
+    _bench_cache["parallel"] = (time.time(), out)
+    return out
+
+
+def reflection_proposals(n: int = 5) -> list[dict[str, Any]]:
+    """振り返り学習の数値パラメータ提案 (diary/reflection_proposals.jsonl、新しい順)。"""
+    path = DIARY_DIR / "reflection_proposals.jsonl"
+    recs: list[dict[str, Any]] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                recs.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    except OSError:
+        return []
+    return list(reversed(recs))[:n]
+

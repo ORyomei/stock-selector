@@ -51,6 +51,7 @@ Claude Agent (headless / Agent SDK) が**市場スキャン → 多角的分析 
 | 3.5 | **反証ゲート** — 必須フィールド・市場環境整合性を検証し不適格を却下 | なし |
 | 3.55 | **ポートフォリオ分散チェック** — セクター過集中となるシグナルを除外（主経路では Step 3 の submit 内で実施済み。テキスト JSON のフォールバック経路のみここで実行） | 補助AI |
 | 4 | **注文実行** — RiskManager 検証 → 成行約定。枠満杯時は swap（入れ替え） | なし |
+| 5 | **並走ベンチマーク** — 同じユニバース・ゲート・規律で LLM を使わず score 順に埋める「ルールのみ」帳簿を進める（`core/rulebook.py`、`config/rulebook.json`、`logs/rulebook_*` / `logs/equity_history_rules.jsonl`）。ダッシュボードで LLM / ルール / TOPIX 買持を比較 | なし |
 
 > 売買の最終実行は LLM の外で行い、安全性を確保している。シグナル 0 件（無理に買わない）も正当な判断。
 
@@ -150,7 +151,7 @@ uv run stock-selector dashboard --stop             # 停止
 uv run stock-selector dashboard --host <IP>        # バインド先変更（Tailscale 等）
 ```
 
-ポートフォリオ・総資産グラフ（約定マーカー・日経/TOPIX 同額投資オーバーレイ付き）・AI 思考トレース（シーケンス図 / サイクル別タイムライン）・障害アラート（watchdog 検知分）を表示。共有ファイルを読むだけでブローカー・デーモンには触れない。
+ポートフォリオ・総資産グラフ（約定マーカー・日経/TOPIX 同額投資オーバーレイ付き）・並走ベンチマーク（LLM / ルールのみ / TOPIX 買持）・振り返りのパラメータ提案・AI 思考トレース（シーケンス図 / サイクル別タイムライン）・障害アラート（watchdog 検知分）を表示。共有ファイルを読むだけでブローカー・デーモンには触れない。
 
 ## リスク管理
 
@@ -225,7 +226,7 @@ stock-selector/
 │   ├── infra/         # DI コンテナ・リポジトリ実装 (broker / AI / market data)
 │   ├── interfaces/    # 抽象インターフェース
 │   └── web/           # Streamlit ダッシュボード
-├── config/            # risk_limits / trading_config / watchlist / シナリオ別プロンプト
+├── config/            # risk_limits / trading_config / rulebook (並走ベンチマーク) / watchlist / シナリオ別プロンプト
 ├── deploy/systemd/    # デーモンの unit ファイル + install.sh
 ├── scripts/           # 通知 (notify.sh)・死活監視 (watchdog.sh)
 ├── diary/             # 分析・シグナル・約定・思考トレース・日次評価の全記録 (gitignore)

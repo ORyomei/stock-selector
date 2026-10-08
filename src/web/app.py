@@ -370,6 +370,59 @@ with st.expander("実現損益の内訳（確定分のみ・期待値の母数�
 
 st.divider()
 
+# ── 並走ベンチマーク (issue #24): LLM vs ルールのみ vs TOPIX 買持 ─────
+st.subheader("🏁 並走ベンチマーク（LLM vs ルールのみ vs TOPIX 買持）")
+try:
+    pb = dd.parallel_benchmark()
+    if pb.get("since"):
+        p1, p2, p3 = st.columns(3)
+        p1.metric("LLM 帳簿（本番）", f"{pb['llm']:+.2f}%" if pb["llm"] is not None else "—")
+        p2.metric("ルールのみ（LLM なし）", f"{pb['rules']:+.2f}%" if pb["rules"] is not None else "—")
+        p3.metric("TOPIX 買持", f"{pb['topix']:+.2f}%" if pb["topix"] is not None else "—")
+        st.caption(
+            f"ルール帳簿の稼働開始 {pb['since']} 以降の累計。同じユニバース・レジームゲート・測定値ゲート・"
+            "サイズ/現金/セクター規律で、違いは「何を買うか」を LLM が選ぶか score 順に埋めるかだけ。"
+            "2 か月で LLM 帳簿がルール帳簿を上回らなければ LLM の役割を候補選定と材料精査に限定する（#24）。"
+        )
+        _ser = {k: v for k, v in (pb.get("series") or {}).items() if v}
+        if _ser:
+            import pandas as _pd
+
+            _daily: dict[str, dict[str, float]] = {}
+            for name, pts in _ser.items():
+                for x, y in pts:
+                    _daily.setdefault(str(x)[:10], {})[name] = y
+            _df = _pd.DataFrame.from_dict(_daily, orient="index").sort_index().ffill()
+            st.line_chart(_df, height=220)
+        _rb = dd.rulebook_status()
+        if _rb.get("positions"):
+            with st.expander("ルール帳簿の保有", expanded=False):
+                st.dataframe(
+                    [{"銘柄": t, "株数": p.get("qty"), "取得": p.get("entry_price"), "直近": p.get("last_price"),
+                      "セクター": p.get("sector"), "score": p.get("score"), "取得日": str(p.get("entry_time", ""))[:10]}
+                     for t, p in _rb["positions"].items()],
+                    hide_index=True,
+                )
+    else:
+        st.caption("ルール帳簿は次のサイクルから稼働します（logs/rulebook_state.json がまだありません）")
+except Exception as e:
+    st.error(f"並走ベンチマーク取得エラー: {e}")
+
+try:
+    _props = dd.reflection_proposals(n=3)
+    if _props:
+        with st.expander("振り返り学習のパラメータ提案（人間承認待ち・最新 3 回）", expanded=False):
+            for r in _props:
+                st.markdown(f"**{str(r.get('ts', ''))[:16]}** — 勝率 {r.get('stats', {}).get('win_rate_pct')}% / {r.get('stats', {}).get('count')} 件")
+                for pr in r.get("proposals") or []:
+                    st.markdown(f"- `{pr['param']}`: {pr['current']:g} → {pr['proposed']:g} — {pr['evidence']}")
+                if not r.get("proposals"):
+                    st.markdown("- 提案なし")
+except Exception:
+    pass
+
+st.divider()
+
 # ── ベンチマーク・期待値 ─────────────────────────────────────────
 st.subheader("📐 ベンチマーク・期待値")
 try:

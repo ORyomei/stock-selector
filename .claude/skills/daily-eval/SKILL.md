@@ -92,6 +92,8 @@ description: 東京市場の大引け後の日次評価（損益 vs 指数・特
    (c) ウォッチ項目の変化
    (d) 実弾移行タイミング（信号・ドローダウン値・前提ゲートの状態）
    (e) 実力評価の一行更新
+   (f) 並走ベンチマーク (#24): `dd.parallel_benchmark()` の LLM / ルールのみ / TOPIX 買持の累計 % を
+       1 行で (ルール帳簿の稼働開始日以降)。baseline に `rules_cum_pct` として記録する
    大イベント（雇用統計・CPI・FOMC・日銀）を跨いだ直後はその影響評価も含める。
    末尾に「投資助言ではなく参考情報」の旨を添える。
 
@@ -111,6 +113,7 @@ description: 東京市場の大引け後の日次評価（損益 vs 指数・特
    vs_topix_pt: +1.08
    nikkei_dd_pct: -1.2
    timing_signal: 待機
+   rules_cum_pct: +0.00
    -->
    ```
 

@@ -94,6 +94,24 @@ def _fetch_macro_safe() -> dict[str, Any] | None:
         return None
 
 
+def _run_rulebook_safe(regime: Any, log: Any) -> None:
+    """並走ベンチマーク (issue #24 (4))。失敗しても本番サイクルは止めない。"""
+    try:
+        from core.rulebook import run_cycle
+
+        log("\nStep 5: 並走ベンチマーク (ルールのみ、LLM なし)...")
+        out = run_cycle(regime=regime, log=log)
+        if not out.get("enabled", True):
+            log("  -> 無効 (config/rulebook.json)")
+            return
+        log(
+            f"  -> ルール帳簿 総資産 ¥{out['equity_jpy']:,.0f} / 現金 ¥{out['cash_jpy']:,.0f} / "
+            f"保有 {len(out['positions'])} ({out['cadence']})"
+        )
+    except Exception as e:
+        log(f"  ⚠️ 並走ベンチマークをスキップ: {e}")
+
+
 def _entry_cadence_safe() -> tuple[bool, str]:
     """判断頻度チェック (issue #22)。不具合時は判断を許可 (フェイルオープン)。"""
     try:
@@ -814,6 +832,10 @@ def run_trade_graph(
 
         # 総資産スナップショット (ベンチマーク比較用の時系列。失敗しても続行)
         record_equity_snapshot()
+
+        # Step 5: 並走ベンチマーク「ルールのみ」(非LLM, issue #24)。同じレジーム判定を渡し、
+        #   同じユニバース・同じゲートで LLM 無しの帳簿を毎サイクル進める
+        _run_rulebook_safe(regime, log)
 
         log(f"\n{'=' * 60}")
         log(f"  サイクル完了: {datetime.now(JST):%H:%M:%S}")
