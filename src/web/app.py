@@ -43,6 +43,8 @@ c4.metric("AI手仕舞い", "ON" if ds["ai_exit"] else "OFF")
 c5.metric("振り返り学習", "ON" if ds["ai_reflection"] else "OFF")
 if ds.get("last_cycle"):
     st.caption(f"最新サイクル: {ds['last_cycle']}")
+if ds.get("regime"):
+    st.caption(f"レジームゲート (#19): {ds['regime']}")
 
 # 障害アラート (watchdog / systemd OnFailure が logs/alerts.log に書く)
 try:

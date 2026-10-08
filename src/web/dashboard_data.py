@@ -77,7 +77,7 @@ def daemon_status() -> dict[str, Any]:
     out: dict[str, Any] = {"running": False, "pid": None, "broker": "?",
                            "ai_exit": False, "ai_reflection": False,
                            "jp_market_open": None, "jp_skip_reason": None,
-                           "running_since": None, "last_cycle": None}
+                           "running_since": None, "last_cycle": None, "regime": None}
     try:
         if LOCK_FILE.exists():
             pid = int(LOCK_FILE.read_text().strip() or 0)
@@ -107,10 +107,14 @@ def daemon_status() -> dict[str, Any]:
         out["jp_skip_reason"] = reason
     except Exception:
         pass
-    # 最新サイクル行
-    for line in reversed(_tail(DAEMON_LOG, 200)):
-        if "### サイクル" in line:
+    # 最新サイクル行 と 最新のレジーム判定 (issue #19: 不成立日は Step 2 が走らない)
+    out["regime"] = None
+    for line in reversed(_tail(DAEMON_LOG, 400)):
+        if out["last_cycle"] is None and "### サイクル" in line:
             out["last_cycle"] = line.strip().lstrip("# ").rstrip(" #")
+        elif out["regime"] is None and "-> レジーム:" in line:
+            out["regime"] = line.split("-> レジーム:", 1)[1].strip()
+        if out["last_cycle"] is not None and out["regime"] is not None:
             break
     return out
 

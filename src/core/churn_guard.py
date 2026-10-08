@@ -7,7 +7,9 @@
 - 売り側: 保有 min_hold_business_days 未満のポジションの AI 判断による
   全量売り (swap) を拒否。機械ストップ・ai_trim (部分利確) は対象外
 - 買い側: 直近 reentry_cooldown_business_days 以内に CLOSE した銘柄の
-  再取得を拒否 (反証ゲートから利用)
+  再取得を拒否 (反証ゲートから利用)。issue #19 で 2 → 20 営業日に延長
+  (再エントリー 14 建玉は勝率 21%・計 -71,919 円、初回 27 建玉は 56%・+43,948 円)。
+  禁止中の銘柄と解除日は reentry_banned でプロンプトにも提示する
 
 営業日は「土日を除く暦日」の近似 (祝日は考慮しない — 保守的側に倒れるだけ)。
 """
@@ -16,7 +18,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +57,22 @@ def business_days_between(start: datetime, end: datetime) -> int:
     return days
 
 
+def add_business_days(d: date, n: int) -> date:
+    """d の n 営業日後 (土日除外、祝日は考慮しない)。n=0 なら d 自身。"""
+    cur = d
+    added = 0
+    while added < n:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            added += 1
+    return cur
+
+
+def _calendar_window_days(cooldown_bdays: int) -> int:
+    """cooldown 営業日分の CLOSE を確実に含む暦日数 (週末分 + 祝日・余裕 7 日)。"""
+    return cooldown_bdays * 7 // 5 + 7
+
+
 def check_min_hold(
     entry_time: str | datetime | None,
     now: datetime | None = None,
@@ -89,8 +107,10 @@ def recent_closes(days: int = 7) -> dict[str, datetime]:
     """直近 days 日の CLOSE 約定 {ticker: 最新のクローズ時刻} (diary/trades から)。"""
     out: dict[str, datetime] = {}
     cutoff = datetime.now(UTC) - timedelta(days=days)
+    # ファイル名は UTC 日付 (YYYY-MM-DD_...)。cutoff の前日以降の名前だけ開く
+    cutoff_name = (cutoff - timedelta(days=1)).strftime("%Y-%m-%d")
     try:
-        paths = sorted(_TRADES_DIR.glob("*_trade.json"))[-200:]
+        paths = [p for p in sorted(_TRADES_DIR.glob("*_trade.json")) if p.name[:10] >= cutoff_name]
     except OSError:
         return out
     for p in paths:
@@ -193,7 +213,7 @@ def check_reentry(
             _load_limits().get("reentry_cooldown_business_days", DEFAULT_REENTRY_COOLDOWN_BDAYS)
         )
     if closes is None:
-        closes = recent_closes()
+        closes = recent_closes(days=_calendar_window_days(cooldown_bdays))
     last = closes.get(ticker)
     if last is None:
         return True, "直近の売却なし"
@@ -204,3 +224,27 @@ def check_reentry(
             f"(経過{elapsed}営業日 < {cooldown_bdays}営業日)"
         )
     return True, f"売却から{elapsed}営業日経過"
+
+
+def reentry_banned(
+    now: datetime | None = None,
+    cooldown_bdays: int | None = None,
+    closes: dict[str, datetime] | None = None,
+) -> dict[str, date]:
+    """再エントリー禁止中の銘柄 → 解除日 (JST。その日から check_reentry が許可する)。
+
+    システムプロンプトに「候補に含めるな」と提示するためのもの (issue #19)。
+    解除日順に並べて返す。
+    """
+    if cooldown_bdays is None:
+        cooldown_bdays = int(
+            _load_limits().get("reentry_cooldown_business_days", DEFAULT_REENTRY_COOLDOWN_BDAYS)
+        )
+    if closes is None:
+        closes = recent_closes(days=_calendar_window_days(cooldown_bdays))
+    now = now or datetime.now(UTC)
+    out: dict[str, date] = {}
+    for ticker, last in closes.items():
+        if business_days_between(last, now) < cooldown_bdays:
+            out[ticker] = add_business_days(last.astimezone(_JST).date(), cooldown_bdays)
+    return dict(sorted(out.items(), key=lambda kv: (kv[1], kv[0])))

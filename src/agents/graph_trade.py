@@ -94,6 +94,17 @@ def _fetch_macro_safe() -> dict[str, Any] | None:
         return None
 
 
+def _fetch_regime_safe() -> Any:
+    """レジームゲート (issue #19) の判定。失敗時は None (呼び出し側でフェイルオープン)。"""
+    try:
+        from core.regime import fetch_regime
+
+        return fetch_regime()
+    except Exception as e:
+        print(f"⚠️  regime gate error (fail-open): {e}", file=sys.stderr)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # System prompt builder
 # ---------------------------------------------------------------------------
@@ -165,6 +176,32 @@ def _build_system_prompt(
         else ""
     )
 
+    # 回転抑制の実値 (config が真実) と再エントリー禁止中の銘柄 (issue #19)。
+    # 禁止銘柄を提示しないと、反証ゲートで却下される銘柄を毎サイクル分析し直す
+    try:
+        from core.churn_guard import (
+            DEFAULT_MIN_HOLD_BDAYS,
+            DEFAULT_REENTRY_COOLDOWN_BDAYS,
+            reentry_banned,
+        )
+        from core.trade import load_risk_limits
+
+        _lim = load_risk_limits()
+        min_hold_bdays = int(_lim.get("min_hold_business_days", DEFAULT_MIN_HOLD_BDAYS))
+        cooldown_bdays = int(
+            _lim.get("reentry_cooldown_business_days", DEFAULT_REENTRY_COOLDOWN_BDAYS)
+        )
+        banned = reentry_banned(cooldown_bdays=cooldown_bdays)
+    except Exception as e:
+        print(f"⚠️  churn config/banned list unavailable: {e}", file=sys.stderr)
+        min_hold_bdays, cooldown_bdays, banned = 2, 20, {}
+    banned_line = (
+        "- **再エントリー禁止中（機械的に却下される。候補に含めないこと）**: "
+        + ", ".join(f"{t} (〜{d:%m/%d})" for t, d in banned.items())
+        if banned
+        else ""
+    )
+
     # Stringency by scenario (aligns with validation_rules.json)
     stringency = {
         "risk_on": "fail_conditions は 1 項目以上、invalidation_conditions は 0 項目以上（任意）",
@@ -214,9 +251,11 @@ def _build_system_prompt(
   使い、スクリーニング段階では使わないこと
 - `submit_signals`: **シグナル提出（最終ステップ・必須）**
 {("- 枠満杯。新規候補のスコアが保有最低スコアより 5 以上高い場合のみ `action: \"swap\"` + sell_ticker で入れ替え" if available <= 0 else "")}
-- **回転抑制ルール（機械的に強制される）**: 取得から2営業日未満の銘柄は swap で売れない
-  （fail_conditions の発動を reason に明記した場合を除く）。売却から2営業日未満の銘柄は
-  買い直せない。短期の往復はスプレッドを失うだけなので、確信が持てない銘柄はそもそも買わないこと
+- **回転抑制ルール（機械的に強制される）**: 取得から{min_hold_bdays}営業日未満の銘柄は swap で売れない
+  （fail_conditions の発動を reason に明記した場合を除く）。売却から{cooldown_bdays}営業日未満の銘柄は
+  買い直せない（過去実績: 再エントリー 14 件は勝率 21%・計 -71,919円）。
+  短期の往復はスプレッドを失うだけなので、確信が持てない銘柄はそもそも買わないこと
+{banned_line}
 - **入口の原則**: fail_conditions に「BB上限超え・RSI過熱・出来高薄」のような
   **翌日にも発動しうる短期矛盾**を書く銘柄は、買わずに押し目を待つこと。
   この型のエントリーは過去5件全て翌日撤退で計 -78,170円（確信度 0.6 以上では機械的に却下される）
@@ -563,12 +602,70 @@ def run_trade_graph(
     scen_label = scenarios_cfg.get("scenarios", {}).get(scenario, {}).get("label", scenario)
     log(f"  -> シナリオ: {scenario} ({scen_label})  macro_score={macro_score}")
 
+    # Step 1.55: レジームゲート (非LLM, issue #19)。指数が上昇トレンド中 (TOPIX > SMA20 かつ
+    #   5日騰落 > 0) でなければ新規エントリー判断 (Step 2) を起動しない。
+    #   41 建玉の実測: 成立局面 21 件 +92,790 円 (勝率 52%) / 不成立局面 20 件 -120,761 円 (35%)。
+    #   出口 (Step 1 機械ストップ・Step 1.7 AI 手仕舞い) は局面に関係なく常時稼働する
+    log("\nStep 1.55: レジームゲート判定...")
+    regime = _fetch_regime_safe()
+    regime_summary = regime.summary() if regime is not None else "判定不能 → フェイルオープン"
+    entries_allowed = regime is None or bool(regime.ok)
+    log(f"  -> レジーム: {regime_summary}")
+
+    def _finalize(
+        signals: list[dict[str, Any]],
+        executed: list[dict[str, Any]],
+        rejected: list[dict[str, Any]],
+        final_text: str,
+    ) -> dict[str, Any]:
+        """サイクル末尾の共通処理 (追跡ログ・資産スナップショット・ログ保存・戻り値)。"""
+        # シグナル追跡ログ (P5): 採用/却下/スキップの全結果を追記し、
+        # 「却下したシグナルはその後どうなったか」を仮想追跡できるようにする
+        _log_signal_outcomes(executed, rejected, scenario)
+
+        # 総資産スナップショット (ベンチマーク比較用の時系列。失敗しても続行)
+        record_equity_snapshot()
+
+        log(f"\n{'=' * 60}")
+        log(f"  サイクル完了: {datetime.now(JST):%H:%M:%S}")
+        log(f"  シナリオ: {scenario} ({scen_label})")
+        log(f"  レジーム: {regime_summary}")
+        log(f"  注文: {len(executed)} 件")
+        for e in executed:
+            log(f"    {e['status']} {e['ticker']} (score={e.get('score', '?')})")
+        if rejected:
+            log(f"  却下: {len(rejected)} 件")
+            for r in rejected:
+                log(f"    ❌ {r.get('ticker', '?')}: {r.get('_gate_rejection_reason', '')}")
+        log(f"{'=' * 60}\n")
+
+        _save_log(
+            file_ts, log_lines, market,
+            ai_text=final_text, scenario=scenario, rejected=rejected, regime=regime_summary,
+        )
+
+        return {
+            "signals": signals,
+            "executed": executed,
+            "rejected": rejected,
+            "scenario": scenario,
+            "regime": regime.to_dict() if regime is not None else None,
+            "entries_allowed": entries_allowed,
+            "log": "\n".join(log_lines),
+            "ai_output": final_text,
+        }
+
     # Step 1.6: ポートフォリオ健全性チェック (非LLM) — 集中超過の警告
     warn_overweight_positions(log)
 
     # Step 1.7: AI 手仕舞い助言 (機械ストップは Step 1 で実行済み=床)。
     #   未発火の保有に対し「より早い手仕舞い」だけを助言。AI はストップを止められない。
     _run_ai_exit_advisor(scenario, provider, model, dry_run, log)
+
+    if not entries_allowed:
+        log("\nStep 2: レジーム不成立のため新規エントリー判断 (メインエージェント) をスキップ")
+        log("  -> 既存ポジションは機械ストップと AI 手仕舞いのみで管理。次サイクルで再判定")
+        return _finalize([], [], [], "")
 
     # Step 1.8: 振り返り学習 — 過去のクローズ実績から教訓を抽出しエントリー判断に反映
     lessons = _reflect_if_enabled(provider, model, log)
@@ -761,39 +858,7 @@ def run_trade_graph(
     else:
         log("\nStep 4: 有効シグナルなし — 注文スキップ")
 
-    # シグナル追跡ログ (P5): 採用/却下/スキップの全結果を追記し、
-    # 「却下したシグナルはその後どうなったか」を仮想追跡できるようにする
-    _log_signal_outcomes(executed, rejected, scenario)
-
-    # 総資産スナップショット (ベンチマーク比較用の時系列。失敗しても続行)
-    record_equity_snapshot()
-
-    # Save log
-    log(f"\n{'=' * 60}")
-    log(f"  サイクル完了: {datetime.now(JST):%H:%M:%S}")
-    log(f"  シナリオ: {scenario} ({scen_label})")
-    log(f"  注文: {len(executed)} 件")
-    for e in executed:
-        log(f"    {e['status']} {e['ticker']} (score={e.get('score', '?')})")
-    if rejected:
-        log(f"  却下: {len(rejected)} 件")
-        for r in rejected:
-            log(f"    ❌ {r.get('ticker', '?')}: {r.get('_gate_rejection_reason', '')}")
-    log(f"{'=' * 60}\n")
-
-    _save_log(
-        file_ts, log_lines, market,
-        ai_text=final_text, scenario=scenario, rejected=rejected,
-    )
-
-    return {
-        "signals": signals,
-        "executed": executed,
-        "rejected": rejected,
-        "scenario": scenario,
-        "log": "\n".join(log_lines),
-        "ai_output": final_text,
-    }
+    return _finalize(signals, executed, rejected, final_text)
 
 
 # ---------------------------------------------------------------------------
@@ -1184,12 +1249,14 @@ def _save_log(
     ai_text: str = "",
     scenario: str = "neutral",
     rejected: list[dict[str, Any]] | None = None,
+    regime: str = "",
 ) -> None:
     market_labels = {"us": "米国株", "jp": "日本株", "all": "全市場"}
     ml = market_labels.get(market, market)
     filename = f"{file_ts}_auto_trade_agent_{ml}.md"
     body = f"# 🤖 LangGraph 売買エージェント — {ml}\n\n"
-    body += f"- **シナリオ**: {scenario}\n\n"
+    body += f"- **シナリオ**: {scenario}\n"
+    body += f"- **レジーム**: {regime or '未判定'}\n\n"
     body += "\n".join(lines) + "\n"
     if rejected:
         body += "\n---\n\n## 反証ゲートで却下されたシグナル\n\n"
