@@ -40,7 +40,8 @@ description: 東京市場の大引け後の日次評価（損益 vs 指数・特
    ファイル名ではなく**中身の timestamp を JST 変換して**判定すること。
    **確定成績（勝敗・実現損益）は手集計せず `dd.performance()['stats']` を唯一の真実とする**
    （手集計は UTC/JST 境界で複数日過少報告していた前科）。
-   機械 stop_loss の発動があれば詳細報告。
+   機械 stop_loss の発動があれば詳細報告。テーゼ判定による退出 (source=`rule:<metric>`、#23)
+   も同様に、どのルールが現在値いくつで成立したかを daemon ログの `Step 1.65` 行から報告する。
 
 4. **特筆すべき判断**: `diary/traces/` の当日分と daemon ログから 1〜3個。
    見送り根拠・反証ゲート却下・AI手仕舞い・deep_research / market_calendar の効き方など。

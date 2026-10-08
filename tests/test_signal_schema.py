@@ -23,6 +23,7 @@ def _sig(**kw):
     base = dict(
         ticker="7203.T", action="buy", score=30, confidence=0.6,
         target_price=3100.0, stop_loss_price=2950.0, take_profit_price=3250.0,
+        invalidation_rules=[{"metric": "close_vs_sma25_pct", "op": "<", "value": 0}],
     )
     base.update(kw)
     return TradeSignalArg(**base)

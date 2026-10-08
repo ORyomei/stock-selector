@@ -273,6 +273,14 @@ def _build_system_prompt(
         else "- **入口の原則**: BB 上限超え・RSI 過熱・出来高薄の銘柄は買わずに押し目を待つこと"
     )
 
+    # 数値ルールの許可リスト (core.thesis_rules が唯一の真実)
+    try:
+        from core.thesis_rules import rules_prompt_block
+
+        rules_block = rules_prompt_block()
+    except Exception:
+        rules_block = "  (一覧取得失敗 — core/thesis_rules.py の ALLOWED_METRICS を参照)"
+
     # Stringency by scenario (aligns with validation_rules.json)
     stringency = {
         "risk_on": "fail_conditions は 1 項目以上、invalidation_conditions は 0 項目以上（任意）",
@@ -354,6 +362,17 @@ def _build_system_prompt(
 - 不確実性が高い場合は正直にその旨を伝える
 - シグナルが0件でも構わない（無理に買わない）
 
+## 🧮 必須: invalidation_rules（テーゼをコードにする）
+
+各シグナルに **invalidation_rules を 1 件以上**付けること（無いと submit が差し戻される）。
+30 分ごとに機械的に評価され、**1 つでも成立したら全株クローズ**される（AI の再解釈なし、
+単元未満の trim 空振りもない）。fail_conditions / invalidation_conditions の文章を数値に翻訳すること。
+使える metric:
+{rules_block}
+例: `[{{"metric": "close_vs_sma25_pct", "op": "<", "value": 0}}, {{"metric": "drawdown_from_peak_pct", "op": "<", "value": -4}}, {{"metric": "topix_5d_pct", "op": "<", "value": -2}}]`
+エントリー直後に成立しうるルール（例: rsi_14 が 60 の銘柄に `rsi_14 > 62` で撤退）を書かねばならない銘柄は、
+そもそも買わないこと。
+
 ## 🚨 必須: 反証ゲート対応（現シナリオ「{scen_label}」の要件）
 
 各シグナルには以下の **必須フィールド** を含めてください。機械的ゲートで検証されます。
@@ -387,6 +406,80 @@ def _ai_exit_enabled() -> bool:
         return bool(load_config().get("ai_exit_advisor", False))
     except Exception:
         return False
+
+
+def _thesis_metrics_safe(position: dict[str, Any], regime: Any) -> dict[str, float | None]:
+    """建玉の現在の指標値 (score_stock 20 分キャッシュ + レジーム)。取得失敗は欠損のまま。"""
+    import contextlib
+    import io
+
+    from core.thesis_rules import compute_metrics
+
+    score = None
+    try:
+        from core.scorer import compute_score_cached
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            score = compute_score_cached(position["ticker"])
+        if not isinstance(score, dict) or "error" in score:
+            score = None
+    except (SystemExit, Exception) as e:
+        print(f"⚠️  thesis metrics: {position.get('ticker')} の score 取得失敗: {e}", file=sys.stderr)
+    return compute_metrics(position, score, regime)
+
+
+def _apply_thesis_rules(regime: Any, dry_run: bool, log: Any) -> list[dict[str, Any]]:
+    """Step 1.65: 数値 invalidation ルール (issue #23) を評価し、成立した建玉を全株クローズ。
+
+    自由文の thesis を補助 AI が読み直す経路と違い、決定論的で単元未満の空振りがない。
+    ルールが無い建玉 (旧形式) は対象外 (AI 手仕舞いが従来通り見る)。
+    """
+    closed: list[dict[str, Any]] = []
+    try:
+        from core.thesis_rules import evaluate_rules, format_rule, load_rules_for
+
+        positions = get_held_positions()
+        if not positions:
+            return closed
+        log("\nStep 1.65: テーゼ判定 (数値 invalidation ルール)...")
+        n_rules = 0
+        for p in positions:
+            ticker = p["ticker"]
+            rules = load_rules_for(ticker)
+            if not rules:
+                continue
+            n_rules += len(rules)
+            metrics = _thesis_metrics_safe(p, regime)
+            fired = evaluate_rules(rules, metrics)
+            if not fired:
+                state = ", ".join(
+                    f"{format_rule(r)} (現在 {metrics.get(r['metric']):.2f})"
+                    if metrics.get(r["metric"]) is not None else f"{format_rule(r)} (現在 不明)"
+                    for r in rules
+                )
+                log(f"  -> {ticker}: {len(rules)} ルール不成立 — {state}")
+                continue
+            desc = "; ".join(f"{format_rule(f)} (現在 {f['actual']:.2f})" for f in fired)
+            qty = int(p.get("quantity") or 0)
+            source = f"rule:{fired[0]['metric']}"
+            if dry_run or qty <= 0:
+                log(f"  [DRY] ルール成立 → 全株クローズ {ticker} {qty}株: {desc}")
+                continue
+            out, rc = run_trade_cmd(["--close", ticker, str(qty), "--source", source])
+            ok = rc == 0 and '"status": "FILLED"' in out
+            if ok:
+                log(f"  ✅ ルール成立 → 全株クローズ {ticker} {qty}株: {desc}")
+            else:
+                log(f"  ❌ ルール成立だがクローズ失敗 {ticker} (rc={rc}: {_result_reason(out)}): {desc}")
+            closed.append({
+                "ticker": ticker, "status": "RULE_EXIT" if ok else "RULE_EXIT_FAILED",
+                "score": 0, "rules": fired,
+            })
+        if n_rules == 0:
+            log("  -> ルール付きの建玉なし (旧形式の thesis は AI 手仕舞いが読む)")
+    except Exception as e:
+        log(f"  ⚠️ テーゼ判定スキップ (機械ストップは適用済み): {e}")
+    return closed
 
 
 def _run_ai_exit_advisor(
@@ -439,8 +532,11 @@ def _run_ai_exit_advisor(
                 unit = get_trading_unit(ticker)
                 qty = (held_qty // 2 // unit) * unit if unit > 0 else held_qty // 2
                 if qty <= 0:
-                    log(f"  -> {ticker}: trim 不可 (単元未満) — スキップ")
-                    continue
+                    # 1 単元保有 (issue #15 → #23): trim は数量 0 で空振りし、SBG が週末ギャップで
+                    # 機械 SL -83,848 円になった。判断があるのに注文に変わらないより exit に昇格する
+                    log(f"  -> {ticker}: trim 不可 (単元未満) → exit に昇格")
+                    a = {**a, "action": "exit"}
+                    qty = held_qty
             else:  # exit
                 qty = held_qty
 
@@ -703,6 +799,8 @@ def run_trade_graph(
         log(f"  サイクル完了: {datetime.now(JST):%H:%M:%S}")
         log(f"  シナリオ: {scenario} ({scen_label})")
         log(f"  レジーム: {regime_summary}")
+        if rule_exits:
+            log(f"  ルール退出: {len(rule_exits)} 件 ({', '.join(r['ticker'] for r in rule_exits)})")
         log(f"  注文: {len(executed)} 件")
         for e in executed:
             log(f"    {e['status']} {e['ticker']} (score={e.get('score', '?')})")
@@ -724,12 +822,17 @@ def run_trade_graph(
             "scenario": scenario,
             "regime": regime.to_dict() if regime is not None else None,
             "entries_allowed": entries_allowed,
+            "rule_exits": rule_exits,
             "log": "\n".join(log_lines),
             "ai_output": final_text,
         }
 
     # Step 1.6: ポートフォリオ健全性チェック (非LLM) — 集中超過の警告
     warn_overweight_positions(log)
+
+    # Step 1.65: テーゼ判定 (非LLM, issue #23) — エントリー時に提出された数値 invalidation
+    #   ルールを決定論的に評価し、成立した建玉は全株クローズ (source=rule:<metric>)
+    rule_exits = _apply_thesis_rules(regime, dry_run, log)
 
     # Step 1.7: AI 手仕舞い助言 (機械ストップは Step 1 で実行済み=床)。
     #   未発火の保有に対し「より早い手仕舞い」だけを助言。AI はストップを止められない。
@@ -1002,6 +1105,8 @@ def _normalize_signals(
             "fail_conditions": s.get("fail_conditions", []),
             "invalidation_conditions": s.get("invalidation_conditions", []),
             "exit_plan": s.get("exit_plan", ""),
+            # 数値 invalidation ルール (issue #23)。シグナルファイルに残り、毎サイクル評価される
+            "invalidation_rules": s.get("invalidation_rules") or [],
             # 入口ゲートの測定値 (issue #20)。signals_log に残し、後から入口条件と成績を突き合わせる
             "_entry_measured": s.get("_entry_measured"),
         }
@@ -1019,6 +1124,21 @@ def _extract_signals(ai_text: str, max_signals: int) -> list[dict[str, Any]]:
     if not parsed:
         return []
     return _normalize_signals(parsed.get("signals", []), max_signals)
+
+
+class InvalidationRuleArg(BaseModel):
+    """数値の無効化ルール 1 件 (issue #23)。metric / op は core.thesis_rules の許可リストのみ。"""
+
+    metric: str = Field(description="指標名 (許可リストから。例: close_vs_sma25_pct)")
+    op: str = Field(description='"<" | "<=" | ">" | ">="')
+    value: float = Field(description="閾値 (数値)")
+
+    @model_validator(mode="after")
+    def _check(self) -> InvalidationRuleArg:
+        from core.thesis_rules import validate_rule
+
+        validate_rule({"metric": self.metric, "op": self.op, "value": self.value})
+        return self
 
 
 class TradeSignalArg(BaseModel):
@@ -1055,6 +1175,13 @@ class TradeSignalArg(BaseModel):
         default_factory=list, description="シグナルの前提が崩れる条件"
     )
     exit_plan: str = Field(default="", description="価格水準を含む具体的な撤退計画")
+    invalidation_rules: list[InvalidationRuleArg] = Field(
+        default_factory=list,
+        description=(
+            "数値の無効化ルール (1 件以上必須)。30 分ごとに機械評価され、1 つでも成立したら全株クローズ。"
+            '例: [{"metric": "close_vs_sma25_pct", "op": "<", "value": 0}]'
+        ),
+    )
     sell_ticker: str = Field(default="", description="swap 時のみ: 売却対象ティッカー")
 
     @model_validator(mode="after")
@@ -1083,6 +1210,18 @@ class TradeSignalArg(BaseModel):
                 "target_price は執行の目標 (現在値近辺) であり、アナリスト目標株価などの"
                 "上値メドを入れる欄ではない。上値メドは reason / exit_plan に書き、"
                 "target_price は take_profit_price 以下に修正して再提出すること"
+            )
+
+        # テーゼをコードにする (issue #23): 自由文だけでは補助 AI の読み直しに依存し、
+        # 1 単元保有では trim が空振りしていた。数値ルールを必須にする
+        if not self.invalidation_rules:
+            from core.thesis_rules import ALLOWED_METRICS, ALLOWED_OPS
+
+            raise ValueError(
+                "invalidation_rules は 1 件以上必須 (30 分ごとに機械評価し、成立したら全株クローズ)。"
+                f"metric は {', '.join(ALLOWED_METRICS)} / op は {' '.join(ALLOWED_OPS)}。"
+                '例: [{"metric": "close_vs_sma25_pct", "op": "<", "value": 0}, '
+                '{"metric": "drawdown_from_peak_pct", "op": "<", "value": -4}]'
             )
 
         # 入口の品質は submit_signals 側の測定値ゲート (core/entry_gate, issue #20) で見る。

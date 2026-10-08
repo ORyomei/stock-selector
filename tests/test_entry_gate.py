@@ -138,7 +138,8 @@ def test_submit_tool_rejects_and_reports_in_same_turn(monkeypatch):
     captured: dict = {}
     tool = gt._make_submit_signals_tool(captured)
     base = dict(action="buy", score=30, confidence=0.6, target_price=100.0,
-                stop_loss_price=95.0, take_profit_price=110.0)
+                stop_loss_price=95.0, take_profit_price=110.0,
+                invalidation_rules=[{"metric": "rsi_14", "op": "<", "value": 45}])
     out = tool.invoke({"signals": [{"ticker": "7203.T", **base}, {"ticker": "6702.T", **base}],
                        "market_comment": "x"})
     assert "1 件受理、1 件を入口ゲートで却下" in out and "6702.T" in out

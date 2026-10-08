@@ -114,6 +114,7 @@ def test_source_category():
     assert dd._source_category("ai_exit") == "AI手仕舞い"
     assert dd._source_category("ai_trim") == "AI手仕舞い"
     assert dd._source_category("mech:stop_loss") == "機械ストップ"
+    assert dd._source_category("rule:close_vs_sma25_pct") == "テーゼ(ルール)"
     assert dd._source_category("swap") == "スワップ"
     assert dd._source_category("manual") == "手動"
     assert dd._source_category("legacy") == "legacy(タグ付け前)"

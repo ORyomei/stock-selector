@@ -538,6 +538,8 @@ def _source_category(src: str) -> str:
         return "AI手仕舞い"
     if src.startswith("mech:"):
         return "機械ストップ"
+    if src.startswith("rule:"):
+        return "テーゼ(ルール)"
     if src == "swap":
         return "スワップ"
     if src == "manual":

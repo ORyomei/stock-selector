@@ -73,6 +73,7 @@ def test_submit_signals_pydantic_enforced_through_sdk(monkeypatch):
         "stop_loss_price": 2400.0, "take_profit_price": 2700.0,
         "timespan": "swing", "fail_conditions": ["x"],
         "invalidation_conditions": ["y"], "exit_plan": "z",
+        "invalidation_rules": [{"metric": "pnl_pct", "op": "<", "value": -3}],
     }
     ok = asyncio.run(sdk_t.handler({"signals": [good_signal], "market_comment": "c"}))
     assert "is_error" not in ok

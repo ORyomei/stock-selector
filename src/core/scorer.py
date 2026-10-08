@@ -310,6 +310,8 @@ def compute_score(ticker: str, period: str = "6mo"):
             "annualized_vol_pct": round(annualized_vol * 100, 1),
             "volume_ratio_20d": round(vol_ratio, 2),
             "macd_hist": round(float(macd_hist), 3),
+            "ret_5d_pct": round(ret_5d * 100, 2),
+            "ret_20d_pct": round(ret_20d * 100, 2),
         },
         "analysis_summary": {
             "total_score": total_score,
