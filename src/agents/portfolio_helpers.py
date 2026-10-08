@@ -166,7 +166,7 @@ def warn_overweight_positions(log: Any = lambda *_: None) -> None:
     try:
         from core.trade import load_risk_limits
 
-        max_pct = float(load_risk_limits().get("max_position_size_pct", 30))
+        max_pct = float(load_risk_limits().get("max_position_size_pct", 20))
         # ブローカーから残高・建玉を一度だけ取得し、総資産と各比率を同じデータで算出
         broker = get_container().broker()
         bal = broker.get_balance()

@@ -105,6 +105,7 @@ def load_signal_from_file(file_path: str) -> TradingSignal | None:
             timespan=_normalize_timespan(data.get("timespan", "swing")),
             reason=data.get("reason", ""),
             score=data.get("score", 0),
+            size_factor=float(data.get("size_factor", 1.0) or 1.0),
         )
     except Exception as e:
         print(f"ERROR: Failed to load signal: {e}", file=sys.stderr)

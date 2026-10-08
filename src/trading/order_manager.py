@@ -45,6 +45,7 @@ class TradingSignal:
         timespan: 推奨ホールド期間 (short | swing | medium | long)
         reason: 判断理由の説明
         score: 総合スコア (0-100)
+        size_factor: サイズ縮小係数 (0 < f ≤ 1。ボラ連動サイズ issue #21、既定 1.0)
         timestamp: シグナル生成時刻
     """
 
@@ -59,6 +60,7 @@ class TradingSignal:
     timespan: TimeSpan = TimeSpan.SWING
     reason: str = ""
     score: int = 0
+    size_factor: float = 1.0
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def validate(self) -> bool:
@@ -81,6 +83,8 @@ class TradingSignal:
             return f"take_profit_price が不正 ({self.take_profit_price})"
         if self.entry_price < 0:
             return f"entry_price が不正 ({self.entry_price})"
+        if not 0.0 < self.size_factor <= 1.0:
+            return f"size_factor が範囲外 ({self.size_factor})"
 
         # 買いの場合: stop_loss < target <= take_profit
         if self.action == TradeAction.BUY and not (
@@ -115,6 +119,7 @@ class TradingSignal:
             "timespan": self.timespan.value,
             "reason": self.reason,
             "score": self.score,
+            "size_factor": self.size_factor,
             "timestamp": self.timestamp.isoformat(),
         }
 
@@ -241,6 +246,7 @@ class OrderManager:
                     stop_loss_price=signal.stop_loss_price,
                     confidence=signal.confidence,
                     current_positions=current_positions,
+                    size_factor=getattr(signal, "size_factor", 1.0),
                 )
                 return qty
             except Exception:

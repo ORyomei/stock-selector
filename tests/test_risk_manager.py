@@ -181,3 +181,45 @@ def test_peak_price_ratchets_up_not_down():
     pos.current_price = 1100
     pos.__post_init__()
     assert pos.peak_price == 1300  # 下落しても高値は維持
+
+
+# ── issue #21: 現金下限とボラ連動サイズ ──────────────────────────
+
+
+def test_cash_floor_reserves_min_cash_pct():
+    """min_cash_pct=20: 現金 100 万・建玉なしなら使えるのは 80 万まで。"""
+    rm = RiskManager({"max_position_size_pct": 100, "min_cash_pct": 20})
+    qty = rm.calculate_position_size(
+        balance={"cash_jpy": 1_000_000, "cash_usd": 0},
+        ticker="7203.T", entry_price=1000.0, stop_loss_price=950.0,
+        confidence=1.0, current_positions=[],
+    )
+    assert 0 < qty * 1000.0 <= 800_000
+
+
+def test_cash_floor_returns_zero_when_cash_already_below_floor():
+    """現金 10 万 / 総資産 100 万 (= 10% < 20%) なら新規は 0 株。"""
+    rm = RiskManager({"max_position_size_pct": 30, "min_cash_pct": 20})
+    qty = rm.calculate_position_size(
+        balance={"cash_jpy": 100_000, "cash_usd": 0},
+        ticker="7203.T", entry_price=1000.0, stop_loss_price=950.0,
+        confidence=1.0, current_positions=[_pos("6501.T", 300, 3000.0)],
+    )
+    assert qty == 0
+
+
+def test_size_factor_scales_value_cap():
+    """size_factor 0.5 で評価額上限が 30% → 15% に縮む (SBG 型の高ボラ銘柄)。"""
+    cash = 3_000_000
+    full = _rm().calculate_position_size(
+        balance={"cash_jpy": cash, "cash_usd": 0}, ticker="9984.T",
+        entry_price=1000.0, stop_loss_price=950.0, confidence=1.0, current_positions=[],
+    )
+    half = _rm().calculate_position_size(
+        balance={"cash_jpy": cash, "cash_usd": 0}, ticker="9984.T",
+        entry_price=1000.0, stop_loss_price=950.0, confidence=1.0, current_positions=[],
+        size_factor=0.5,
+    )
+    assert full * 1000.0 <= cash * PCT / 100 + 1000.0
+    assert half * 1000.0 <= cash * PCT / 100 * 0.5 + 1000.0
+    assert 0 < half < full

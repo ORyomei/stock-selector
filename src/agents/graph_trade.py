@@ -138,6 +138,35 @@ def _build_system_prompt(
     market_labels = {"us": "米国株", "jp": "日本株", "all": "全市場"}
     ml = market_labels.get(market, market)
 
+    # 現金・セクターの現況 (issue #21)。現金下限・セクター上限は機械的に強制されるため、
+    # 執行不能な候補を選ばないよう数字を見せる (従来は現金残高がプロンプトに無かった)
+    try:
+        from agents.auto_trade import _cash_by_currency
+        from agents.portfolio_helpers import USD_JPY_APPROX
+
+        lim21 = _sizing_limits()
+        cash21 = _cash_by_currency(get_container().broker().get_balance())
+        cash_jpy = cash21["JPY"] + cash21["USD"] * USD_JPY_APPROX
+        holdings21, equity21 = _holdings_with_sectors()
+        cash_pct = cash_jpy / equity21 * 100 if equity21 > 0 else 0.0
+        sec_w: dict[str, float] = {}
+        for _t, _s, _v in holdings21:
+            sec_w[_s] = sec_w.get(_s, 0.0) + (_v / equity21 * 100 if equity21 > 0 else 0.0)
+        sector_line = ", ".join(
+            f"{s_} {w:.0f}%" for s_, w in sorted(sec_w.items(), key=lambda kv: -kv[1])
+        ) or "なし"
+        cash_block = (
+            f"- 現金: ¥{cash_jpy:,.0f}（総資産比 {cash_pct:.0f}%。下限 {lim21['min_cash_pct']:.0f}% を"
+            "割る買いは執行されない）\n"
+            f"- 機械的上限: 1 銘柄 {lim21['max_position_size_pct']:.0f}% / 同一セクター "
+            f"{lim21['max_sector_pct']:.0f}%（年率ボラ {lim21['vol_half_size_above_pct']:.0f}% 超は"
+            f"サイズ 1/2、{lim21['vol_third_size_above_pct']:.0f}% 超は 1/3）\n"
+            f"- 保有セクター比率: {sector_line}"
+        )
+    except Exception as e:
+        print(f"⚠️  cash/sector block unavailable: {e}", file=sys.stderr)
+        cash_block = ""
+
     # --- Scenario-specific blocks ---
     scenarios_cfg = scenarios_cfg or {}
     scen = scenarios_cfg.get("scenarios", {}).get(scenario, {})
@@ -247,6 +276,7 @@ def _build_system_prompt(
 - ポジション: {cur_pos}/{max_pos} (空き: {available})
 - 保有銘柄:
 {held_summary}
+{cash_block}
 
 ## 思考順序（このシナリオで重視する質問を上から順に検討すること）
 {questions_block}
@@ -478,7 +508,7 @@ def _max_unit_cost_jpy_safe() -> float | None:
         from agents.portfolio_helpers import total_equity_jpy
         from core.trade import load_risk_limits
 
-        max_pct = float(load_risk_limits().get("max_position_size_pct", 30))
+        max_pct = float(load_risk_limits().get("max_position_size_pct", 20))
         equity = total_equity_jpy()
         return equity * max_pct / 100 if equity > 0 else None
     except Exception:
@@ -1130,6 +1160,107 @@ def _result_reason(out: str) -> str:
     return tail[0][:200] if tail else "理由不明 (出力なし)"
 
 
+def _sizing_limits() -> dict[str, float]:
+    """サイズ・現金・セクターの機械ルール (issue #21) の実値。config が真実、失敗時は既定値。"""
+    from core.sizing import (
+        DEFAULT_MAX_SECTOR_PCT,
+        DEFAULT_MIN_CASH_PCT,
+        DEFAULT_VOL_HALF_SIZE_ABOVE_PCT,
+        DEFAULT_VOL_THIRD_SIZE_ABOVE_PCT,
+    )
+
+    try:
+        from core.trade import load_risk_limits
+
+        lim = load_risk_limits()
+    except Exception:
+        lim = {}
+    return {
+        "max_position_size_pct": float(lim.get("max_position_size_pct", 20)),
+        "min_cash_pct": float(lim.get("min_cash_pct", DEFAULT_MIN_CASH_PCT)),
+        "max_sector_pct": float(lim.get("max_sector_pct", DEFAULT_MAX_SECTOR_PCT)),
+        "vol_half_size_above_pct": float(
+            lim.get("vol_half_size_above_pct", DEFAULT_VOL_HALF_SIZE_ABOVE_PCT)
+        ),
+        "vol_third_size_above_pct": float(
+            lim.get("vol_third_size_above_pct", DEFAULT_VOL_THIRD_SIZE_ABOVE_PCT)
+        ),
+    }
+
+
+def _sector_of(ticker: str) -> str:
+    """銘柄のセクター (yfinance、プロセス内キャッシュ)。取れなければ '不明'。"""
+    try:
+        from agents.portfolio_review import _sector
+
+        return _sector(ticker)
+    except Exception:
+        return "不明"
+
+
+def _holdings_with_sectors() -> tuple[list[tuple[str, str, float]], float]:
+    """保有の [(ticker, sector, 評価額 JPY)] と総資産 JPY。"""
+    from agents.portfolio_helpers import _position_value_jpy, total_equity_jpy
+
+    holdings: list[tuple[str, str, float]] = []
+    for p in get_held_positions():
+        price = float(p.get("current_price") or p.get("entry_price") or 0)
+        qty = int(p.get("quantity") or 0)
+        holdings.append((p["ticker"], _sector_of(p["ticker"]), _position_value_jpy(p["ticker"], price, qty)))
+    return holdings, total_equity_jpy()
+
+
+def _sector_cap_ok(
+    sig: dict[str, Any], limits: dict[str, float], exclude_ticker: str | None = None
+) -> tuple[bool, str]:
+    """セクター上限 (issue #21)。見込みサイズは「総資産 × 1 銘柄上限 × ボラ係数」
+    (評価額上限が効く前提の保守的な見積もり)。判定不能は通す。"""
+    try:
+        from core.sizing import sector_cap_check, vol_size_factor
+
+        holdings, equity = _holdings_with_sectors()
+        measured = sig.get("_entry_measured") or {}
+        factor = vol_size_factor(
+            measured.get("annualized_vol_pct"),
+            limits["vol_half_size_above_pct"], limits["vol_third_size_above_pct"],
+        )
+        prospective = equity * limits["max_position_size_pct"] / 100 * factor
+        return sector_cap_check(
+            holdings, sig["ticker"], _sector_of(sig["ticker"]), prospective, equity,
+            limits["max_sector_pct"], exclude_ticker=exclude_ticker,
+        )
+    except Exception as e:
+        print(f"⚠️  sector cap check skipped: {e}", file=sys.stderr)
+        return True, f"セクター判定不能のため通過: {e}"
+
+
+def _swap_feasible(
+    sig: dict[str, Any], sell_pos: dict[str, Any], limits: dict[str, float]
+) -> tuple[bool, str]:
+    """片肺 swap 防止 (issue #21): 売る前に買い足 1 単元が賄えるかを検査。判定不能は通す。"""
+    try:
+        from agents.auto_trade import _cash_by_currency, _order_cost
+        from agents.portfolio_helpers import USD_JPY_APPROX, _position_value_jpy, total_equity_jpy
+        from core.sizing import swap_feasibility
+
+        est_price = float(sig.get("target_price") or 0)
+        if est_price <= 0:
+            return True, "買い足の価格不明のため通過"
+        cash = _cash_by_currency(get_container().broker().get_balance())
+        cash_jpy = cash["JPY"] + cash["USD"] * USD_JPY_APPROX
+        sell_value = _position_value_jpy(
+            sell_pos["ticker"],
+            float(sell_pos.get("current_price") or sell_pos.get("entry_price") or 0),
+            int(sell_pos.get("quantity") or 0),
+        )
+        ccy, _unit, est_cost = _order_cost(sig["ticker"], est_price)
+        est_jpy = est_cost if ccy == "JPY" else est_cost * USD_JPY_APPROX
+        return swap_feasibility(cash_jpy, sell_value, est_jpy, total_equity_jpy(), limits["min_cash_pct"])
+    except Exception as e:
+        print(f"⚠️  swap feasibility check skipped: {e}", file=sys.stderr)
+        return True, f"判定不能のため通過: {e}"
+
+
 def _execute_signals(
     signals: list[dict[str, Any]],
     dry_run: bool,
@@ -1140,6 +1271,7 @@ def _execute_signals(
 
     exposure_cap_pct: シナリオ別の最大エクスポージャ (建玉評価額/総資産 の上限%)。
     None なら制限なし。risk_off で買い進んでフルインベストになるのを防ぐ。
+    機械ルール (issue #21): 現金下限・セクター上限・片肺 swap 防止・ボラ連動サイズ。
     """
     executed: list[dict[str, Any]] = []
     if dry_run:
@@ -1149,6 +1281,7 @@ def _execute_signals(
         return executed
 
     diary = get_container().diary()
+    limits = _sizing_limits()
     for sig in signals:
         # Handle swap: sell first, then buy
         if sig.get("sell_ticker"):
@@ -1167,6 +1300,23 @@ def _execute_signals(
                     log(f"  🔒 swap 却下 ({sell_ticker}): {hold_msg}")
                     executed.append(
                         {"ticker": sell_ticker, "status": "SWAP_BLOCKED_MIN_HOLD", "score": 0}
+                    )
+                    continue
+
+                # 片肺 swap 防止 (issue #21): 買い足 1 単元が賄えない swap は売り足も出さない
+                ok_swap, swap_msg = _swap_feasible(sig, sell_pos, limits)
+                if not ok_swap:
+                    log(f"  🔒 swap 却下 ({sell_ticker} → {sig['ticker']}): {swap_msg}")
+                    executed.append(
+                        {"ticker": sig["ticker"], "status": "SWAP_BLOCKED_FUNDS", "score": sig.get("score", 0)}
+                    )
+                    continue
+                # セクター上限 (issue #21): 売り足を除いた保有で判定
+                ok_sec, sec_msg = _sector_cap_ok(sig, limits, exclude_ticker=sell_ticker)
+                if not ok_sec:
+                    log(f"  🧭 swap 却下 ({sig['ticker']}): {sec_msg}")
+                    executed.append(
+                        {"ticker": sig["ticker"], "status": "SKIPPED_SECTOR_CAP", "score": sig.get("score", 0)}
                     )
                     continue
 
@@ -1199,12 +1349,7 @@ def _execute_signals(
                 )
                 executed.append({"ticker": sig["ticker"], "status": "SKIPPED_FUNDS", "score": sig.get("score", 0)})
                 continue
-            try:
-                from core.trade import load_risk_limits
-
-                max_pos_pct = float(load_risk_limits().get("max_position_size_pct", 30))
-            except Exception:
-                max_pos_pct = 30.0
+            max_pos_pct = limits["max_position_size_pct"]
             equity = total_equity_jpy()
             cap = equity * max_pos_pct / 100 if equity > 0 else 0.0
             cap_ccy = cap if ccy == "JPY" else cap / USD_JPY_APPROX
@@ -1216,11 +1361,12 @@ def _execute_signals(
                 executed.append({"ticker": sig["ticker"], "status": "SKIPPED_CAP", "score": sig.get("score", 0)})
                 continue
 
+            cash_total_jpy = cash["JPY"] + cash["USD"] * USD_JPY_APPROX
+            est_jpy = est_cost if ccy == "JPY" else est_cost * USD_JPY_APPROX
+
             # シナリオ別エクスポージャ上限 (risk_off で買い進みすぎない)
             if exposure_cap_pct is not None and equity > 0:
-                cash_total_jpy = cash["JPY"] + cash["USD"] * USD_JPY_APPROX
                 positions_value = max(0.0, equity - cash_total_jpy)
-                est_jpy = est_cost if ccy == "JPY" else est_cost * USD_JPY_APPROX
                 new_exposure_pct = (positions_value + est_jpy) / equity * 100
                 if new_exposure_pct > exposure_cap_pct:
                     log(
@@ -1232,9 +1378,45 @@ def _execute_signals(
                     )
                     continue
 
+            # 現金下限 (issue #21): 1 単元買っても現金比率が下限を割らないこと
+            #   (実サイズは RiskManager が同じ下限で計算する。ここは早期スキップとログのため)
+            from core.sizing import cash_floor_check
+
+            ok_cash, cash_msg = cash_floor_check(cash_total_jpy, est_jpy, equity, limits["min_cash_pct"])
+            if not ok_cash:
+                log(f"  💴 {sig['ticker']}: {cash_msg} -> スキップ")
+                executed.append(
+                    {"ticker": sig["ticker"], "status": "SKIPPED_CASH_FLOOR", "score": sig.get("score", 0)}
+                )
+                continue
+
+            # セクター上限 (issue #21)
+            ok_sec, sec_msg = _sector_cap_ok(sig, limits)
+            if not ok_sec:
+                log(f"  🧭 {sig['ticker']}: {sec_msg} -> スキップ")
+                executed.append(
+                    {"ticker": sig["ticker"], "status": "SKIPPED_SECTOR_CAP", "score": sig.get("score", 0)}
+                )
+                continue
+
+        # ボラ連動サイズ (issue #21): 年率ボラ > 60% で 1/2、> 80% で 1/3 (RiskManager が適用)
+        from core.sizing import vol_size_factor
+
+        measured = sig.get("_entry_measured") or {}
+        size_factor = vol_size_factor(
+            measured.get("annualized_vol_pct"),
+            limits["vol_half_size_above_pct"], limits["vol_third_size_above_pct"],
+        )
+        if size_factor < 1.0:
+            log(
+                f"  📉 {sig['ticker']}: 年率ボラ {float(measured.get('annualized_vol_pct')):.0f}% "
+                f"→ サイズ係数 {size_factor:.2f}"
+            )
+
         # Buy — 成行注文（シミュレーターが指値PENDINGに非対応のため）
         buy_sig = {k: v for k, v in sig.items() if k != "sell_ticker" and not k.startswith("_")}
         buy_sig["entry_price"] = 0  # MARKET order
+        buy_sig["size_factor"] = size_factor
         sig_name = f"{sig['ticker'].replace('.', '')}_auto.json"
         sig_path = diary.save_signal(sig_name, buy_sig)
         out, rc = run_trade_cmd(["--from-signal", sig_path])

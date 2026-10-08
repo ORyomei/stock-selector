@@ -43,6 +43,9 @@ class RiskManager:
         # 「利小損大」になっていたため、勝ちを伸ばすゲートとして導入)。
         self.trailing_activation_pct = config.get("trailing_activation_pct", 0)
         self.forbidden_tickers = config.get("forbidden_tickers", [])
+        # 現金下限 (issue #21): 総資産 × min_cash_pct は常に現金で残す。
+        # 露出 97〜99% が常態化し swap が片肺になっていたため、サイズ計算の分母から外す
+        self.min_cash_pct = float(config.get("min_cash_pct", 0) or 0)
 
     def calculate_position_size(
         self,
@@ -52,15 +55,18 @@ class RiskManager:
         stop_loss_price: float,
         confidence: float = 0.5,
         current_positions: list[Position] | None = None,
+        size_factor: float = 1.0,
     ) -> int:
         """ポジションサイズを計算する
 
         Kelly's formula 簡易版:
         position_size = (資金 × 許容損失%) / (entry_price - stop_loss_price)
 
-        ただし最終的に「建玉評価額 ≤ 総資産 × max_position_size_pct」を
+        ただし最終的に「建玉評価額 ≤ 総資産 × max_position_size_pct × size_factor」を
         ハード上限として強制する。Kelly 式は損切り幅が浅いと現金を超える
         建玉を要求するため、この上限がないと 1 銘柄に資金が集中する。
+        「資金」は現金から現金下限 (総資産 × min_cash_pct) を引いた使用可能額。
+        size_factor はボラ連動の縮小係数 (issue #21、0 < f ≤ 1)。
 
         Args:
             balance: 残高辞書 {"cash_jpy": ..., "cash_usd": ...}
@@ -91,8 +97,29 @@ class RiskManager:
         if available_cash <= 0:
             raise ValueError(f"No available {currency} cash")
 
-        # 許容損失額を計算 (資金 × max_position_size_pct × confidence)
-        allowed_risk_amount = available_cash * (self.max_position_size_pct / 100) * confidence
+        size_factor = min(1.0, float(size_factor))
+        if size_factor <= 0:
+            return 0
+
+        # 総資産 (同一通貨) = 現金 + 同一通貨の建玉評価額
+        same_ccy_positions = [
+            p
+            for p in (current_positions or [])
+            if self._get_currency(p.ticker) == currency
+        ]
+        holdings_value = sum(p.current_price * p.quantity for p in same_ccy_positions)
+        total_assets = available_cash + holdings_value
+
+        # 現金下限 (issue #21): 総資産 × min_cash_pct は使わない
+        cash_floor = total_assets * (self.min_cash_pct / 100)
+        spendable = available_cash - cash_floor
+        if spendable <= 0:
+            return 0
+
+        # 許容損失額を計算 (使用可能資金 × max_position_size_pct × confidence × size_factor)
+        allowed_risk_amount = (
+            spendable * (self.max_position_size_pct / 100) * confidence * size_factor
+        )
 
         # 1 株あたりのリスク = entry_price - stop_loss_price
         risk_per_share = entry_price - stop_loss_price
@@ -103,24 +130,18 @@ class RiskManager:
         # 最小 1 株
         position_size = max(1, position_size)
 
-        # 資金の絶対上限: 買える最大株数を超えないようクリップ
-        max_affordable = int(available_cash / entry_price) if entry_price > 0 else 0
-        if max_affordable > 0:
-            position_size = min(position_size, max_affordable)
+        # 資金の絶対上限: 使用可能資金で買える最大株数を超えないようクリップ
+        max_affordable = int(spendable / entry_price) if entry_price > 0 else 0
+        if max_affordable <= 0:
+            return 0
+        position_size = min(position_size, max_affordable)
 
-        # 評価額上限: 建玉評価額 ≤ 総資産(同一通貨) × max_position_size_pct を強制。
+        # 評価額上限: 建玉評価額 ≤ 総資産(同一通貨) × max_position_size_pct × size_factor を強制。
         # 同一銘柄の買い増し時は既存建玉も合算して判定する。
-        same_ccy_positions = [
-            p
-            for p in (current_positions or [])
-            if self._get_currency(p.ticker) == currency
-        ]
-        holdings_value = sum(p.current_price * p.quantity for p in same_ccy_positions)
-        total_assets = available_cash + holdings_value
         existing_same_ticker = sum(
             p.current_price * p.quantity for p in same_ccy_positions if p.ticker == ticker
         )
-        max_position_value = total_assets * (self.max_position_size_pct / 100)
+        max_position_value = total_assets * (self.max_position_size_pct / 100) * size_factor
         remaining_allowance = max_position_value - existing_same_ticker
         value_cap_shares = int(max(0.0, remaining_allowance) / entry_price)
         position_size = min(position_size, value_cap_shares)
