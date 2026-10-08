@@ -67,8 +67,10 @@ def score_stock(ticker: str, period: str = "6mo") -> dict[str, Any]:
     総合スコア、上昇確率、目標価格、エントリーポイント、損切り/利確ラインを返す。
     ticker: ティッカーシンボル (例: AAPL, 7203.T)
     period: 分析期間 (例: 3mo, 6mo, 1y)"""
-    from core.scorer import compute_score
-    return _safe(compute_score, ticker, period)
+    from core.scorer import compute_score_cached
+
+    # 20 分キャッシュ: submit 時の入口ゲート (issue #20) が同じ値を再利用する
+    return _safe(compute_score_cached, ticker, period)
 
 
 @tool

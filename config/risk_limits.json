@@ -22,5 +22,11 @@
     "ticker": "1306.T",
     "sma_window": 20,
     "lookback_days": 5
+  },
+  "entry_gate": {
+    "enabled": true,
+    "max_bb_position_pct": 85,
+    "max_rsi": 65,
+    "min_score": 40
   }
 }

@@ -202,6 +202,27 @@ def _build_system_prompt(
         else ""
     )
 
+    # 入口の測定値ゲート (issue #20) の閾値 — プロンプトと機械却下で同じ数字を使う
+    try:
+        from core.entry_gate import load_entry_gate_config
+
+        _eg = load_entry_gate_config()
+    except Exception:
+        _eg = {}
+    eg_enabled = bool(_eg.get("enabled", True))
+    eg_bb = float(_eg.get("max_bb_position_pct", 85))
+    eg_rsi = float(_eg.get("max_rsi", 65))
+    eg_score = float(_eg.get("min_score", 40))
+    eff_min_score = max(float(min_score), eg_score) if eg_enabled else float(min_score)
+    entry_gate_block = (
+        f"- **入口の測定値ゲート（submit 時に score_stock を再計測して機械的に却下）**: "
+        f"BB 位置 {eg_bb:.0f}% 以下・RSI {eg_rsi:.0f} 以下・score {eg_score:.0f} 以上を全て満たす銘柄のみ提出可。\n"
+        "  過熱した銘柄（BB 85% 超は 10 件中 7 敗で計 -103,959円、RSI 65 超は 3 件全敗）は押し目を待つこと。\n"
+        "  confidence の自己申告や fail_conditions の文面はゲートに使わない（数字でしか通らない）"
+        if eg_enabled
+        else "- **入口の原則**: BB 上限超え・RSI 過熱・出来高薄の銘柄は買わずに押し目を待つこと"
+    )
+
     # Stringency by scenario (aligns with validation_rules.json)
     stringency = {
         "risk_on": "fail_conditions は 1 項目以上、invalidation_conditions は 0 項目以上（任意）",
@@ -214,7 +235,7 @@ def _build_system_prompt(
 
 ## 現在の設定
 - 対象市場: {ml}
-- 最小スコア閾値: {min_score}
+- 最小スコア閾値: {eff_min_score:.0f}
 - 最大シグナル数: {max_signals}
 - モード: {"ドライラン（注文なし）" if dry_run else "本番"}
 {affordability_line}
@@ -238,7 +259,7 @@ def _build_system_prompt(
 - `check_macro`: 市場全体のマクロ環境確認（VIX・金利・為替・主要指数）
 - `analyze_events`: 地政学・金利・関税等のイベント影響分析
 - `screen_stocks(market="{market}")`: 銘柄スクリーニング（保有銘柄 {', '.join(held) if held else 'なし'} は除外）
-- `score_stock`: テクニカルスコア（score が {min_score} 以上のみ採用）
+- `score_stock`: テクニカルスコア（score が {eff_min_score:.0f} 以上のみ採用。BB 位置・RSI の実値は indicators に出る）
 - `analyze_fundamentals`: 財務状況確認
 - `check_sentiment`: ニュースセンチメント
 - `get_technical` / `get_news` / `get_prices`: 補助データ
@@ -256,9 +277,7 @@ def _build_system_prompt(
   買い直せない（過去実績: 再エントリー 14 件は勝率 21%・計 -71,919円）。
   短期の往復はスプレッドを失うだけなので、確信が持てない銘柄はそもそも買わないこと
 {banned_line}
-- **入口の原則**: fail_conditions に「BB上限超え・RSI過熱・出来高薄」のような
-  **翌日にも発動しうる短期矛盾**を書く銘柄は、買わずに押し目を待つこと。
-  この型のエントリーは過去5件全て翌日撤退で計 -78,170円（確信度 0.6 以上では機械的に却下される）
+{entry_gate_block}
 
 ## 出力方法 — 必読
 
@@ -487,6 +506,7 @@ def _log_signal_outcomes(
                 "ticker": e.get("ticker"),
                 "status": e.get("status"),
                 "score": e.get("score"),
+                "measured": e.get("measured"),
             })
         for r in rejected:
             diary.append_signal_log({
@@ -765,10 +785,14 @@ def run_trade_graph(
 
     # Step 3: Parse signals from AI output (non-LLM)
     log("\nStep 3: シグナル抽出...")
+    rejected: list[dict[str, Any]] = []
     if tool_signals is not None:
-        # 構造化ツール経由 (主経路): スキーマ検証済みなので正規化のみ
+        # 構造化ツール経由 (主経路): スキーマ検証 + 入口ゲート済みなので正規化のみ
         log(f"  -> submit_signals ツール経由で受理 ({len(tool_signals)} 件)")
         signals = _normalize_signals(tool_signals, max_signals)
+        for t, msg in captured.get("entry_gate_rejected") or []:
+            log(f"  ❌ {t}: {msg}")
+            rejected.append({"ticker": t, "_gate_rejection_reason": f"entry_gate: {msg}"})
     else:
         # フォールバック: ツール未呼び出し時はテキストから JSON を抽出
         signals = _extract_signals(final_text, max_signals)
@@ -800,9 +824,20 @@ def run_trade_graph(
             log(f"  -> フォローアップ: {followup_text[:300]}")
             signals = _extract_signals(followup_text, max_signals)
 
-    log(f"  -> {len(signals)} 件のシグナル")
+    if tool_signals is None and signals:
+        # フォールバック経路 (テキスト JSON) も同じ入口ゲート (issue #20) を通す
+        kept: list[dict[str, Any]] = []
+        for s in signals:
+            ok, msg, measured = _evaluate_entry_safe(s["ticker"])
+            if ok:
+                s["_entry_measured"] = measured
+                kept.append(s)
+            else:
+                log(f"  ❌ {s['ticker']}: {msg}")
+                rejected.append({"ticker": s["ticker"], "_gate_rejection_reason": f"entry_gate: {msg}"})
+        signals = kept
 
-    rejected: list[dict[str, Any]] = []
+    log(f"  -> {len(signals)} 件のシグナル")
 
     # Step 3.45: 執行可能性フィルタ (非LLM) — 1単元コストが評価額上限を超える銘柄は
     # 執行段階で必ず弾かれるため、反証ゲート (LLM) の前に落としてシグナル枠と
@@ -901,6 +936,8 @@ def _normalize_signals(
             "fail_conditions": s.get("fail_conditions", []),
             "invalidation_conditions": s.get("invalidation_conditions", []),
             "exit_plan": s.get("exit_plan", ""),
+            # 入口ゲートの測定値 (issue #20)。signals_log に残し、後から入口条件と成績を突き合わせる
+            "_entry_measured": s.get("_entry_measured"),
         }
         if action == "swap":
             sig["sell_ticker"] = s.get("sell_ticker", "")
@@ -982,22 +1019,8 @@ class TradeSignalArg(BaseModel):
                 "target_price は take_profit_price 以下に修正して再提出すること"
             )
 
-        # 入口の自己矛盾チェック (issue #14): fail_conditions に短期テクニカル矛盾
-        # (過熱・出来高薄) を自書きしながら高確信度で買うパターンが、9月の負けの
-        # ほぼ全て (エントリー翌日に自書き条件が発動して撤退、5件で -78k)。
-        _SHORT_TERM_RISK_KWS = (
-            "BB上限", "ボリンジャー上限", "バンド上限超", "RSI過熱", "RSI高水準",
-            "出来高伴わない", "出来高薄", "出来高不足", "過熱", "急騰後の反落",
-        )
-        joined = " ".join(self.fail_conditions)
-        hits = [kw for kw in _SHORT_TERM_RISK_KWS if kw in joined]
-        if hits and self.confidence >= 0.6:
-            raise ValueError(
-                f"自己矛盾: fail_conditions に短期テクニカル矛盾 ({'/'.join(hits[:3])}) を"
-                f"記載しながら confidence {self.confidence} は高すぎる。"
-                "この条件は翌日にも発動しうる (過去実績: 同型5件で計-78,170円)。"
-                "confidence を 0.5 未満に下げるか、条件が解消する押し目まで見送ること"
-            )
+        # 入口の品質は submit_signals 側の測定値ゲート (core/entry_gate, issue #20) で見る。
+        # #14 の「語句照合 ∧ confidence ≥ 0.6」は表記ゆれと 0.55 申告で素通りしたため撤去 (#17)
         return self
 
 
@@ -1020,8 +1043,29 @@ def _make_submit_signals_tool(captured: dict[str, Any]) -> Any:
     from langchain_core.tools import StructuredTool
 
     def _submit(signals: list[TradeSignalArg], market_comment: str = "") -> str:
-        captured["signals"] = [s.model_dump() for s in signals]
+        # 入口の測定値ゲート (issue #20): 自己申告ではなく score_stock の実測で検査し、
+        # 却下はこのツール応答でエージェントに即時に返す (同一ターン内で別候補を検討できる)
+        accepted: list[dict[str, Any]] = []
+        rejected: list[tuple[str, str]] = []
+        for sig in signals:
+            ok, msg, measured = _evaluate_entry_safe(sig.ticker)
+            d = sig.model_dump()
+            d["_entry_measured"] = measured
+            d["_entry_gate"] = msg
+            if ok:
+                accepted.append(d)
+            else:
+                rejected.append((sig.ticker, msg))
+        captured["signals"] = accepted
         captured["market_comment"] = market_comment
+        captured["entry_gate_rejected"] = rejected
+        if rejected:
+            detail = "; ".join(f"{t}: {m}" for t, m in rejected)
+            return (
+                f"{len(accepted)} 件受理、{len(rejected)} 件を入口ゲートで却下 — {detail}。"
+                "却下銘柄は測定値が条件を満たすまで提出不可 (confidence や文面を変えても通らない)。"
+                "別候補があれば受理済み分も含めて全件を再提出し、なければ簡潔な分析コメントで回答を終えること"
+            )
         return f"{len(signals)} 件のシグナルを受理しました。簡潔な分析コメントで回答を終えてください。"
 
     return StructuredTool.from_function(
@@ -1033,6 +1077,17 @@ def _make_submit_signals_tool(captured: dict[str, Any]) -> Any:
         ),
         args_schema=SubmitSignalsArgs,
     )
+
+
+def _evaluate_entry_safe(ticker: str) -> tuple[bool, str, dict[str, Any] | None]:
+    """入口の測定値ゲート (issue #20)。ゲート自体の不具合はフェイルオープン。"""
+    try:
+        from core.entry_gate import evaluate_entry
+
+        return evaluate_entry(ticker)
+    except Exception as e:
+        print(f"⚠️  entry gate error (fail-open): {e}", file=sys.stderr)
+        return True, f"入口ゲート不調のため通過: {e}", None
 
 
 def _apply_counterargument_gate(
@@ -1178,7 +1233,7 @@ def _execute_signals(
                     continue
 
         # Buy — 成行注文（シミュレーターが指値PENDINGに非対応のため）
-        buy_sig = {k: v for k, v in sig.items() if k != "sell_ticker"}
+        buy_sig = {k: v for k, v in sig.items() if k != "sell_ticker" and not k.startswith("_")}
         buy_sig["entry_price"] = 0  # MARKET order
         sig_name = f"{sig['ticker'].replace('.', '')}_auto.json"
         sig_path = diary.save_signal(sig_name, buy_sig)
@@ -1189,7 +1244,12 @@ def _execute_signals(
         else:
             log(f"  ❌ {sig['ticker']} 約定失敗 (rc={rc}): {_result_reason(out)}")
         executed.append(
-            {"ticker": sig["ticker"], "status": "FILLED" if ok else "FAILED", "score": sig.get("score", 0)}
+            {
+                "ticker": sig["ticker"],
+                "status": "FILLED" if ok else "FAILED",
+                "score": sig.get("score", 0),
+                "measured": sig.get("_entry_measured"),
+            }
         )
     return executed
 

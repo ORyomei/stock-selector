@@ -65,19 +65,14 @@ def test_invalid_action_rejected():
         _sig(action="sell")
 
 
-def test_self_contradiction_high_confidence_rejected():
-    """issue #14: fail_conditions に短期矛盾を自書きした高確信度エントリーを拒否。"""
-    with pytest.raises(ValidationError, match="自己矛盾"):
-        _sig(
-            confidence=0.65,
-            fail_conditions=["BB上限超えからの反落リスク、出来高伴わない急騰の失敗"],
-        )
+def test_self_written_short_term_risk_no_longer_rejected_by_schema():
+    """#14 の語句照合 ∧ confidence ゲートは撤去 (#17 で素通りを実証)。
 
-
-def test_self_contradiction_low_confidence_allowed():
-    """同じ fail_conditions でも confidence < 0.6 なら通す (認識した上での小口)。"""
+    入口の品質は submit_signals 側の測定値ゲート (core/entry_gate, #20) が見る。
+    スキーマは価格関係と action だけを検証する。
+    """
     s = _sig(
-        confidence=0.5,
-        fail_conditions=["BB上限超えからの反落リスク"],
+        confidence=0.65,
+        fail_conditions=["BB上限超えからの反落リスク、出来高伴わない急騰の失敗"],
     )
-    assert s.confidence == 0.5
+    assert s.confidence == 0.65

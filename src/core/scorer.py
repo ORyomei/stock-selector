@@ -12,7 +12,9 @@ from __future__ import annotations
 import json
 import math
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import ta
@@ -297,6 +299,18 @@ def compute_score(ticker: str, period: str = "6mo"):
         "name": info.get("shortName", ""),
         "currency": info.get("currency", ""),
         "current_price": current,
+        # 生の測定値 (入口ゲート issue #20 が submit 時に照合する。スコア内訳だけでは
+        # BB 位置や RSI の実値が分からなかった)
+        "indicators": {
+            "rsi_14": round(float(rsi), 1),
+            "bb_position_pct": round(float(bb_pct) * 100, 1),
+            "sma_5": round(float(sma_5), 2),
+            "sma_25": round(float(sma_25), 2),
+            "sma_75": round(float(sma_75), 2),
+            "annualized_vol_pct": round(annualized_vol * 100, 1),
+            "volume_ratio_20d": round(vol_ratio, 2),
+            "macd_hist": round(float(macd_hist), 3),
+        },
         "analysis_summary": {
             "total_score": total_score,
             "score_breakdown": scores,
@@ -345,4 +359,31 @@ def compute_score(ticker: str, period: str = "6mo"):
     }
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# プロセス内キャッシュ (issue #20)
+# ---------------------------------------------------------------------------
+
+_SCORE_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+SCORE_CACHE_TTL_SEC = 20 * 60
+
+
+def compute_score_cached(
+    ticker: str, period: str = "6mo", ttl_sec: int = SCORE_CACHE_TTL_SEC
+) -> dict[str, Any]:
+    """compute_score の結果をプロセス内で ttl_sec 秒キャッシュする。
+
+    エージェントが score_stock で測った値を入口ゲート (core/entry_gate) が submit 時に
+    再利用し、同一サイクル内の二重フェッチと「ツールとゲートで値が違う」事態を避ける。
+    stdout への JSON ダンプはキャッシュミス時のみ出る。
+    """
+    key = (ticker, period)
+    now = time.monotonic()
+    hit = _SCORE_CACHE.get(key)
+    if hit is not None and now - hit[0] < ttl_sec:
+        return hit[1]
+    result = compute_score(ticker, period)
+    _SCORE_CACHE[key] = (now, result)
     return result

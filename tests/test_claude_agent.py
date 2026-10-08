@@ -51,10 +51,13 @@ def test_sdk_tool_validation_error_is_returned_not_raised():
     assert "ERROR" in out["content"][0]["text"]
 
 
-def test_submit_signals_pydantic_enforced_through_sdk():
+def test_submit_signals_pydantic_enforced_through_sdk(monkeypatch):
     """submit_signals 変換後もスキーマ検証が効き、captured に格納される。"""
+    from agents import graph_trade as gt
     from agents.graph_trade import _make_submit_signals_tool
 
+    # 入口の測定値ゲート (#20) は実データを測るので、ここでは通過に固定する
+    monkeypatch.setattr(gt, "_evaluate_entry_safe", lambda t: (True, "stub", None))
     captured: dict = {}
     sdk_t = lc_tool_to_sdk(_make_submit_signals_tool(captured))
 
