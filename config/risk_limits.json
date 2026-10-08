@@ -15,7 +15,7 @@
     "long": 180
   },
   "forbidden_tickers": [],
-  "min_hold_business_days": 2,
+  "min_hold_business_days": 5,
   "reentry_cooldown_business_days": 20,
   "regime_gate": {
     "enabled": true,

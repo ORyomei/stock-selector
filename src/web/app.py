@@ -45,6 +45,8 @@ if ds.get("last_cycle"):
     st.caption(f"最新サイクル: {ds['last_cycle']}")
 if ds.get("regime"):
     st.caption(f"レジームゲート (#19): {ds['regime']}")
+if ds.get("entry_decision"):
+    st.caption(f"本日の新規エントリー判断 (#22, 1 日 1 回): {ds['entry_decision']}")
 
 # 障害アラート (watchdog / systemd OnFailure が logs/alerts.log に書く)
 try:

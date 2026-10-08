@@ -4,6 +4,10 @@
   "ai_exit_min_hold_days": 1,
   "ai_reflection": true,
   "ai_portfolio_review": true,
+  "entry_decision": {
+    "enabled": true,
+    "time_jst": "10:30"
+  },
   "simulator": {
     "initial_capital_jpy": 3000000,
     "initial_capital_usd": 0,

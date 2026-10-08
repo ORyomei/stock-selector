@@ -107,6 +107,23 @@ def daemon_status() -> dict[str, Any]:
         out["jp_skip_reason"] = reason
     except Exception:
         pass
+    # 本日の新規エントリー判断 (issue #22: 1 日 1 回)
+    out["entry_decision"] = None
+    try:
+        from core.entry_cadence import JST as _JST
+        from core.entry_cadence import load_cadence_config, load_state
+
+        _st = load_state()
+        _cfg = load_cadence_config()
+        _today = datetime.now(_JST).date().isoformat()
+        if not _cfg.get("enabled", True):
+            out["entry_decision"] = "制限なし"
+        elif _st.get("last_date") == _today:
+            out["entry_decision"] = f"済 {_st.get('last_time', '?')}"
+        else:
+            out["entry_decision"] = f"未 ({_cfg.get('time_jst', '10:30')} 以降)"
+    except Exception:
+        pass
     # 最新サイクル行 と 最新のレジーム判定 (issue #19: 不成立日は Step 2 が走らない)
     out["regime"] = None
     for line in reversed(_tail(DAEMON_LOG, 400)):

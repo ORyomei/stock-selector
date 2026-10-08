@@ -94,6 +94,27 @@ def _fetch_macro_safe() -> dict[str, Any] | None:
         return None
 
 
+def _entry_cadence_safe() -> tuple[bool, str]:
+    """判断頻度チェック (issue #22)。不具合時は判断を許可 (フェイルオープン)。"""
+    try:
+        from core.entry_cadence import check_now
+
+        return check_now()
+    except Exception as e:
+        print(f"⚠️  entry cadence check error (fail-open): {e}", file=sys.stderr)
+        return True, f"判断頻度チェック不調のため実施: {e}"
+
+
+def _mark_entry_decided_safe(log: Any) -> None:
+    try:
+        from core.entry_cadence import mark_decided
+
+        st = mark_decided()
+        log(f"  -> 本日の新規エントリー判断を記録 ({st.get('last_date')} {st.get('last_time')})")
+    except Exception as e:
+        print(f"⚠️  entry cadence mark failed: {e}", file=sys.stderr)
+
+
 def _fetch_regime_safe() -> Any:
     """レジームゲート (issue #19) の判定。失敗時は None (呼び出し側でフェイルオープン)。"""
     try:
@@ -265,6 +286,8 @@ def _build_system_prompt(
 ## 現在の設定
 - 対象市場: {ml}
 - 最小スコア閾値: {eff_min_score:.0f}
+- 判断頻度: 新規エントリー判断はこのサイクルが本日唯一（1 日 1 回）。最低保有 {min_hold_bdays} 営業日のため、
+  5 営業日持ち続けられる根拠がある銘柄だけを選ぶこと（保有 0〜4 営業日の建玉は過去 24 件 29% 勝率・計 -179,783円）
 - 最大シグナル数: {max_signals}
 - モード: {"ドライラン（注文なし）" if dry_run else "本番"}
 {affordability_line}
@@ -717,6 +740,15 @@ def run_trade_graph(
         log("  -> 既存ポジションは機械ストップと AI 手仕舞いのみで管理。次サイクルで再判定")
         return _finalize([], [], [], "")
 
+    # Step 1.9: 判断頻度 (issue #22) — 新規エントリー判断は 1 日 1 回 (既定 10:30 JST 以降の
+    #   最初のサイクル)。30 分ごとの白紙再判断が同日翻意と 0〜4 営業日の回転 (-179,783 円) を
+    #   生んでいた。他のサイクルは Step 1 (機械ストップ) と Step 1.7 (AI 手仕舞い) だけ
+    decide, cadence_msg = _entry_cadence_safe()
+    if not decide:
+        log(f"\nStep 2: {cadence_msg} — 新規エントリー判断 (メインエージェント) をスキップ")
+        return _finalize([], [], [], "")
+    log(f"\nStep 1.9: {cadence_msg}")
+
     # Step 1.8: 振り返り学習 — 過去のクローズ実績から教訓を抽出しエントリー判断に反映
     lessons = _reflect_if_enabled(provider, model, log)
 
@@ -803,6 +835,10 @@ def run_trade_graph(
 
     # タイムアウト時はゾンビ実行が後から captured を埋める可能性があるため読まない
     tool_signals = None if timed_out else captured.get("signals")
+
+    # 判断を実施した記録 (issue #22)。タイムアウト・エラーは未判断のままにして次サイクルで再試行
+    if not timed_out and (final_text or tool_signals is not None):
+        _mark_entry_decided_safe(log)
 
     # 思考トレース (ツール呼び出し列・推論) を永続化 — 可視化用。失敗してもサイクルは止めない
     try:
