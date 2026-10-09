@@ -1,0 +1,28 @@
+# ダッシュボード (Streamlit、読み取り専用)。トレーダーと同じく systemd で常駐させる。
+# src/web/ を変更したら `sudo systemctl restart stock-selector-dashboard` で反映すること。
+# Streamlit の自動リロードは src/web/ 配下のモジュールしか対象にせず、ブラウザ接続中しか
+# 監視しないため、長時間稼働のプロセスは古い dashboard_data を掴み続ける (2026-10-09 に
+# 「並走ベンチマーク取得エラー: module has no attribute 'parallel_benchmark'」として顕在化)。
+[Unit]
+Description=stock-selector dashboard (Streamlit, read-only)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
+OnFailure=stock-selector-notify@%n.service
+
+[Service]
+Type=simple
+User=ryomei
+WorkingDirectory=/home/ryomei/Projects/stock-selector
+Environment=HOME=/home/ryomei
+Environment=PATH=/home/ryomei/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ryomei/.local/bin/uv run stock-selector dashboard --host 127.0.0.1 --port 8501
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/ryomei/Projects/stock-selector/logs/dashboard.log
+StandardError=append:/home/ryomei/Projects/stock-selector/logs/dashboard.log
+
+[Install]
+WantedBy=multi-user.target

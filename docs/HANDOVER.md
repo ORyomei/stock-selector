@@ -56,7 +56,7 @@
 systemctl status stock-selector-trader        # デーモン状態
 sudo systemctl restart stock-selector-trader  # コード反映
 uv run stock-selector stop                    # 手動停止 (systemd は再起動しない)
-uv run stock-selector dashboard --daemon      # ダッシュボード
+sudo systemctl restart stock-selector-dashboard  # ダッシュボード (src/web 変更の反映。常駐は systemd)
 uv run stock-selector portfolio status        # 残高確認
 tail -f logs/auto_trade_daemon.log            # ログ監視
 ```
@@ -80,6 +80,10 @@ tail -f logs/auto_trade_daemon.log            # ログ監視
 6. **ANTHROPIC_API_KEY を環境に置かない** — あると Claude Code がサブスクではなく
    従量課金にフォールバックする（コードは実行時に自動で外すが、原則置かない）
 7. デーモンとダッシュボードは flock で排他/独立。手動起動と systemd も排他
+8. **ダッシュボードはコード変更後に再起動が必要** — Streamlit は起動時に読んだ
+   `dashboard_data` 等を掴み続ける（自動リロードは `src/web/` 配下だけ、かつブラウザ接続中のみ）。
+   2026-10-09 に「並走ベンチマーク取得エラー: no attribute 'parallel_benchmark'」として顕在化。
+   以後は systemd 常駐 (`stock-selector-dashboard.service`) にして `systemctl restart` で反映
 
 ## 6. Open issues（実弾移行の前提）
 

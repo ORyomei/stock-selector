@@ -144,6 +144,15 @@ uv run stock-selector auto-trade --market jp --dry-run  # ドライラン（注�
 
 ## ダッシュボード（Streamlit・読み取り専用）
 
+本番は systemd 常駐（`deploy/systemd/install.sh` で `stock-selector-dashboard.service` も登録される）:
+
+```bash
+sudo systemctl restart stock-selector-dashboard    # src/web/ 変更の反映（Streamlit は古いモジュールを掴み続けるため必須）
+systemctl status stock-selector-dashboard          # 状態確認（ログ: logs/dashboard.log）
+```
+
+手動実行（開発用。systemd 常駐中はポート使用中として起動を拒否する）:
+
 ```bash
 uv run stock-selector dashboard                    # http://127.0.0.1:8501
 uv run stock-selector dashboard --daemon           # 常駐

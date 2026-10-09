@@ -13,7 +13,9 @@ AI 自動株式売買システム（シミュレーション運用中・実弾�
 - **diary/trades のファイル名は UTC 日付** — 当日分の抽出は中身の timestamp を JST 変換して判定
 - **ANTHROPIC_API_KEY を環境に置かない** — サブスク認証が従量課金にフォールバックする
 - コード変更したら: `uv run ruff check src/ tests/` → `uv run pytest` →
-  `sudo systemctl restart stock-selector-trader`（実際に動かして確認するまで完了としない）
+  `sudo systemctl restart stock-selector-trader`（実際に動かして確認するまで完了としない）。
+  `src/web/` を変えたら `sudo systemctl restart stock-selector-dashboard` も必須
+  （Streamlit は起動時に読んだモジュールを掴み続け、自動リロードは当てにならない）
 - ドキュメント同期: 実装変更時は `.claude/skills/sync-docs` の手順に従う
 - コミットは論理単位で分割し、理由・実測値・issue 番号をメッセージに残す（`git log` の流儀を踏襲）
 

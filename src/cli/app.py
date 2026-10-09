@@ -409,6 +409,15 @@ def _dashboard_pid() -> int | None:
         return None
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    """host:port に既に何かが listen しているか (systemd 常駐と手動起動の二重起動防止)。"""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1" if host == "0.0.0.0" else host, port)) == 0
+
+
 @app.command()
 def dashboard(
     port: Annotated[int, typer.Option(help="ポート")] = 8501,
@@ -419,6 +428,8 @@ def dashboard(
     """取引状況ダッシュボードを起動 (Streamlit, 読み取り専用).
 
     既定はフォアグラウンド (Ctrl+C で停止)。--daemon で常駐、--stop で停止。
+    本番は systemd (stock-selector-dashboard.service) が常駐させる。コード変更の反映は
+    `sudo systemctl restart stock-selector-dashboard` (Streamlit は古いモジュールを掴み続ける)。
     """
     import signal as sig
     import subprocess
@@ -436,6 +447,11 @@ def dashboard(
     existing = _dashboard_pid()
     if existing is not None:
         typer.echo(f"⚠️  既に常駐ダッシュボードが稼働中です (PID={existing})。停止: stock-selector dashboard --stop")
+        raise typer.Exit(1)
+    if _port_in_use(host, port):
+        typer.echo(
+            f"⚠️  {host}:{port} は既に使用中です (systemd 常駐なら: systemctl status stock-selector-dashboard)"
+        )
         raise typer.Exit(1)
 
     app_path = Path(__file__).resolve().parent.parent / "web" / "app.py"
