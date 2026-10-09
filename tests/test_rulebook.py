@@ -142,6 +142,7 @@ def test_run_cycle_decides_once_per_day_and_records(tmp_path, monkeypatch):
     # 同日 2 回目は判断しない、資産は記録される
     out2 = rb.run_cycle(datetime(2026, 10, 9, 5, 0, tzinfo=UTC), regime=_Regime(), log=logs.append, universe=["A.T", "B.T"])
     assert out2["decided"] is False and list(out2["positions"]) == ["A.T"]
+    assert "に実施済み" in out2["cadence"] and "?" not in out2["cadence"]  # 判断時刻 (JST) が表示される
     assert len((tmp_path / "equity.jsonl").read_text().splitlines()) == 2
     assert (tmp_path / "trades.jsonl").read_text().count('"BUY"') == 1
 

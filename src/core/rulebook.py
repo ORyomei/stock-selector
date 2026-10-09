@@ -87,6 +87,7 @@ def new_state(cfg: dict[str, Any], now: datetime) -> dict[str, Any]:
         "positions": {},  # ticker -> {qty, entry_price, entry_time, peak, sector}
         "closes": {},  # ticker -> 最終売却日 (再エントリー禁止)
         "last_decision_date": None,
+        "last_decision_time": None,
     }
 
 
@@ -355,7 +356,7 @@ def run_cycle(
     # 新規判断 (1 日 1 回、レジーム成立時のみ)
     decided_now = False
     decide, why = should_decide(
-        now, {"enabled": True, "time_jst": cfg["decision_time_jst"]}, {"last_date": state.get("last_decision_date")}
+        now, {"enabled": True, "time_jst": cfg["decision_time_jst"]}, {"last_date": state.get("last_decision_date"), "last_time": state.get("last_decision_time")}
     )
     regime_ok = regime is None or bool(getattr(regime, "ok", True))
     if decide and regime_ok:
@@ -381,6 +382,7 @@ def run_cycle(
             _append_jsonl(TRADES_PATH, tr)
             log(f"  📘 ルール帳簿 BUY {tr['ticker']} {tr['qty']}株 @{tr['price']:,.0f} ({tr['reason']})")
         state["last_decision_date"] = now.astimezone(JST).date().isoformat()
+        state["last_decision_time"] = now.astimezone(JST).strftime("%H:%M")
         decided_now = True
         log(f"  📘 ルール帳簿: 候補 {len(cands)} → 新規 {len(chosen)} (枠 {len(state['positions'])}/{cfg['max_positions']})")
     elif decide and not regime_ok:
