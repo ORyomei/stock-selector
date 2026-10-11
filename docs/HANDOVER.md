@@ -93,9 +93,15 @@ tail -f logs/auto_trade_daemon.log            # ログ監視
 9. **kabu API は Host ヘッダが `localhost` でないと 400 (HTML の Bad Request)** — Windows の
    HTTP.sys が URL 予約を Host で照合する。別マシンからは `ssh -L` で転送して
    `http://localhost:<port>` で叩く（`kabu.host` は `localhost` のまま）。127.0.0.1 でも駄目
-10. **検証環境 (18081) のトークンは検証環境ログイン中だけ** — 本番ログイン中に 18081 へ
-    /token すると `{"Code":4001013,"Message":"トークン取得失敗"}`（パスワードが正しくても）。
-    本番 (18080) は同時に 200 を返すので「パスワード違い」と誤診しやすい
+10. **検証環境 (18081) と本番 (18080) は API パスワードが別** — 検証側のパスワード違いは
+    `{"Code":4001013,"Message":"トークン取得失敗"}`。ログイン環境は無関係で、本番ログイン中でも
+    18081 は応答する（2026-10-12 に「検証環境ログインが必要」と一度誤診した）
+11. **検証環境は疎通確認専用** — wallet/symbol/board は null、positions/orders は空、sendorder は
+    `{"Result":0,"OrderId":null}`。約定→ポジション反映→reconcile の E2E は本番で最小単位
+    （例: 1545.T 10 口 ≒ 数千円）の実注文でしか検証できない
+12. **kabu API には実行回数制限がある** — `429 {"Code":4001006,"Message":"API実行回数エラー"}`。
+    reconcile を 3 連続（`/wallet/cash` 6 回 / 2 秒）で発生。`_request` が 1.2 秒待って 3 回まで
+    再試行する（`kabu.rate_limit_retries` / `rate_limit_wait_sec`）
 
 ## 6. Open issues（実弾移行の前提）
 

@@ -18,9 +18,11 @@ kabuステーション (Windows アプリ) が起動した状態で、ローカ�
      host は "localhost" のまま (deploy/systemd/stock-selector-kabu-tunnel.service が常駐)。
      Windows の HTTP.sys が Host ヘッダで URL 予約を照合するため、127.0.0.1 や IP を
      Host にすると 400 Bad Request (HTML) になる
-  7. 検証環境 (18081) のトークンは kabuステーションを検証環境でログインしている間だけ取れる
-     (本番ログイン中は 18080 のみ)。パスワードは .env の KABU_API_PASSWORD_STG (検証) /
-     KABU_API_PASSWORD_PRD (本番) を config の kabu.api_password_env で選ぶ
+  7. 検証環境 (18081) と本番 (18080) は API パスワードが別。.env の KABU_API_PASSWORD_STG (検証) /
+     KABU_API_PASSWORD_PRD (本番) を config の kabu.api_password_env で選ぶ (4001013 = 不一致)
+  8. 検証環境は疎通とリクエスト形式の確認専用: wallet/symbol/board は null、positions/orders は空、
+     sendorder は {"Result":0,"OrderId":null} を返す (約定・ポジション反映の E2E はできない。
+     本番で最小単位の実注文を出すしかない)
 
 注意:
   - 日本株のみ対応 (現物 / 信用)。米国株は非対応 (kabu API の仕様)
@@ -93,8 +95,9 @@ class KabuStationError(Exception):
 def _token_error_message(exc: Exception) -> str:
     """/token 失敗を人が直せるメッセージにする (応答本文の Code/Message と環境のヒント付き)。
 
-    実測 (2026-10-12): 本番ログイン中の kabuステーションに検証環境 (18081) で /token すると
-    401 {"Code":4001013,"Message":"トークン取得失敗"}。本番 (18080) は同じ瞬間に 200。
+    実測 (2026-10-12): 検証環境 (18081) に本番用や古いパスワードで /token すると
+    401 {"Code":4001013,"Message":"トークン取得失敗"}。検証環境のパスワードを直すと 200
+    (ログイン環境は無関係: 本番ログイン中でも 18081 は応答する)。
     """
     body = ""
     resp = getattr(exc, "response", None)
@@ -106,8 +109,9 @@ def _token_error_message(exc: Exception) -> str:
     hint = "kabuステーションが起動・ログイン済みか確認してください。"
     if "4001013" in body:
         hint += (
-            " 検証環境 (18081) のトークンは kabuステーションを検証環境でログインしている間だけ取得できます"
-            " (本番ログイン中は 18080 のみ応答)。API パスワードの環境変数 (_STG / _PRD) の取り違えも確認。"
+            " 4001013 は接続した環境の API パスワード不一致です。検証環境 (18081) と本番 (18080) は"
+            " パスワードが別なので、.env の KABU_API_PASSWORD_STG (検証) / _PRD (本番) と"
+            " kabuステーションの API 設定を突き合わせてください。"
         )
     if "Bad Request" in body and "<HTML" in body.upper():
         hint += " Host ヘッダが localhost 以外 (127.0.0.1 や IP 直指定) だと Windows の HTTP.sys が 400 を返します。host は localhost にして ssh -L で転送してください。"
@@ -151,6 +155,10 @@ class KabuStationBroker(BrokerInterface):
         self.default_exchange = int(config.get("default_exchange", EXCHANGE_TOSHO))
         self.account_type = config.get("account_type", ACCOUNT_TYPE_TOKUTEI)
         self.timeout = config.get("timeout", 10)
+        # 実行回数制限 (429 {"Code":4001006,"Message":"API実行回数エラー"}) の再試行。
+        # 実測 2026-10-12: reconcile を 3 連続 (= /wallet/cash 6 回 / 2 秒) で発生
+        self.rate_limit_retries = int(config.get("rate_limit_retries", 3))
+        self.rate_limit_wait_sec = float(config.get("rate_limit_wait_sec", 1.2))
 
         self._token: str | None = None
         # 注文・ポジションのキャッシュ (sync() で更新)
@@ -207,6 +215,19 @@ class KabuStationBroker(BrokerInterface):
                 # トークン失効 → 再取得して 1 回リトライ
                 self._token = None
                 headers = self._headers()
+                resp = requests.request(
+                    method,
+                    url,
+                    headers=headers,
+                    json=json_body,
+                    params=params,
+                    timeout=self.timeout,
+                )
+            # 429 は受理前の拒否なので発注 POST でも再送して二重にならない
+            for _ in range(self.rate_limit_retries):
+                if resp.status_code != 429:
+                    break
+                time.sleep(self.rate_limit_wait_sec)
                 resp = requests.request(
                     method,
                     url,

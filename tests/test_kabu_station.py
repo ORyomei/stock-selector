@@ -16,7 +16,7 @@ def _http_error(text: str) -> requests.HTTPError:
     return exc
 
 
-def test_token_error_hints_sandbox_login_for_4001013():
+def test_token_error_hints_password_mismatch_for_4001013():
     msg = _token_error_message(_http_error('{"Code":4001013,"Message":"トークン取得失敗"}'))
     assert "4001013" in msg and "検証環境" in msg and "_STG" in msg
 
@@ -43,3 +43,51 @@ def test_ensure_token_raises_kabu_error_with_hint(monkeypatch):
         assert "検証環境" in str(e)
     else:
         raise AssertionError("KabuStationError が送出されるべき")
+
+
+class _FakeResp:
+    def __init__(self, status: int, payload=None):
+        self.status_code = status
+        self._payload = payload
+        self.text = "" if payload is None else str(payload)
+        self.content = b"x" if payload is not None else b""
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            exc = requests.HTTPError(f"{self.status_code} Client Error")
+            exc.response = self  # type: ignore[assignment]
+            raise exc
+
+
+def _broker_with_token() -> KabuStationBroker:
+    b = KabuStationBroker({"host": "localhost", "port": 18081, "sandbox": True, "api_password": "x"})
+    b._token = "tok"
+    return b
+
+
+def test_request_retries_after_rate_limit_429(monkeypatch):
+    import infra.brokers.kabu_station as ks
+
+    seq = [_FakeResp(429, {"Code": 4001006, "Message": "API実行回数エラー"}), _FakeResp(200, {"StockAccountWallet": 1.0})]
+    calls: list[str] = []
+    monkeypatch.setattr(requests, "request", lambda method, url, **kw: (calls.append(url), seq.pop(0))[1])
+    waits: list[float] = []
+    monkeypatch.setattr(ks.time, "sleep", waits.append)
+    out = _broker_with_token()._request("GET", "/wallet/cash")
+    assert out == {"StockAccountWallet": 1.0} and len(calls) == 2 and waits == [1.2]
+
+
+def test_request_gives_up_after_retries_on_persistent_429(monkeypatch):
+    import infra.brokers.kabu_station as ks
+
+    monkeypatch.setattr(requests, "request", lambda *a, **kw: _FakeResp(429, {"Code": 4001006}))
+    monkeypatch.setattr(ks.time, "sleep", lambda *_: None)
+    try:
+        _broker_with_token()._request("GET", "/wallet/cash")
+    except KabuStationError as e:
+        assert "4001006" in str(e)
+    else:
+        raise AssertionError("429 が続いたら KabuStationError")
