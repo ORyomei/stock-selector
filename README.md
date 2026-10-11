@@ -257,5 +257,5 @@ uv run pytest
 ## 注意事項
 
 - **投資助言ではない** — 出力は参考情報であり、投資判断の責任はユーザーにある
-- **ブローカー切替** — `config/trading_config.json` の `broker` で `"simulator"` / `"kabu"` を切替。kabuステーション API は `KABU_API_PASSWORD` 環境変数が必要。既定はシミュレーター（仮想売買）
+- **ブローカー切替** — `config/trading_config.json` の `broker` で `"simulator"` / `"kabu"` を切替。既定はシミュレーター（仮想売買）。kabuステーション API のパスワードは `.env` の `KABU_API_PASSWORD_STG`（検証 18081）/ `KABU_API_PASSWORD_PRD`（本番 18080）に置き、`kabu.api_password_env` でどちらを使うか選ぶ。kabuステーションは Windows 機の localhost にしか API を開かないため、`stock-selector-kabu-tunnel.service`（`ssh -L` で `win` へ転送）を常駐させ `kabu.host` は `localhost` のままにする（HTTP.sys の Host 照合で IP 直指定は 400 になる）。検証環境のトークンは kabuステーションを検証環境でログインしている間だけ取れる
 - API キーは `.env` で管理（gitignore 済み）

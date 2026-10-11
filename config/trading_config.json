@@ -17,7 +17,7 @@
     "host": "localhost",
     "port": 18081,
     "sandbox": true,
-    "api_password_env": "KABU_API_PASSWORD",
+    "api_password_env": "KABU_API_PASSWORD_STG",
     "order_exchange": 9,
     "default_exchange": 1,
     "account_type": 4,

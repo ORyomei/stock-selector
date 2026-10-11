@@ -1,0 +1,21 @@
+# kabuステーション API への SSH トンネル。kabu API は Windows 機の localhost にしか bind しないため、
+# ~/.ssh/config の "win" (Tailscale 経由、鍵認証) に -L で 18080 (本番) / 18081 (検証) を転送する。
+# アクセスは必ず http://localhost:<port> で行う (Windows の HTTP.sys が Host ヘッダで URL 予約を照合
+# するため、127.0.0.1 や Tailscale IP を Host にすると 400 Bad Request になる)。
+# Windows 機がスリープ/再起動で落ちても 15 秒ごとに再接続し続ける (StartLimit 無効)。
+[Unit]
+Description=stock-selector ssh tunnel to kabu station API (win:18080/18081 -> localhost)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ryomei
+Environment=HOME=/home/ryomei
+ExecStart=/usr/bin/ssh -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new -L 127.0.0.1:18080:127.0.0.1:18080 -L 127.0.0.1:18081:127.0.0.1:18081 win
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

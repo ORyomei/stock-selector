@@ -47,6 +47,10 @@
 - **Tailscale funnel**（ダッシュボード公開する場合）: `tailscale funnel --bg 8501`。
   tailnet の HTTPS 有効化は済んでいるが、**ノード単位の funnel 承認**が必要
   （初回実行時に表示される URL を踏む）。公開URLはノード名で変わる
+- **kabu API 接続**（2026-10-12 設定）: `.env` の `KABU_API_PASSWORD_STG` / `_PRD`（gitignore）、
+  `~/.ssh/config` の `Host win`（Windows 機 desktop-9uc3mft、鍵 `~/.ssh/rsa_win`）、
+  `stock-selector-kabu-tunnel.service`（`ssh -L` で 18080/18081 を localhost に転送）。
+  いずれも新マシンでは手で再設定
 - **日次評価の定例ジョブ**: Claude Code セッション内 cron のため消える。
   新セッションで `/daily-eval arm`（スキルは repo に入っている）
 
@@ -57,6 +61,8 @@ systemctl status stock-selector-trader        # デーモン状態
 sudo systemctl restart stock-selector-trader  # コード反映
 uv run stock-selector stop                    # 手動停止 (systemd は再起動しない)
 sudo systemctl restart stock-selector-dashboard  # ダッシュボード (src/web 変更の反映。常駐は systemd)
+systemctl status stock-selector-kabu-tunnel      # kabu API への ssh トンネル (win の localhost:18080/18081 を転送)
+uv run stock-selector kabu-check                 # kabu API 疎通 (トンネル + kabuステーション起動・ログインが前提)
 uv run stock-selector portfolio status        # 残高確認
 tail -f logs/auto_trade_daemon.log            # ログ監視
 ```
@@ -84,6 +90,12 @@ tail -f logs/auto_trade_daemon.log            # ログ監視
    `dashboard_data` 等を掴み続ける（自動リロードは `src/web/` 配下だけ、かつブラウザ接続中のみ）。
    2026-10-09 に「並走ベンチマーク取得エラー: no attribute 'parallel_benchmark'」として顕在化。
    以後は systemd 常駐 (`stock-selector-dashboard.service`) にして `systemctl restart` で反映
+9. **kabu API は Host ヘッダが `localhost` でないと 400 (HTML の Bad Request)** — Windows の
+   HTTP.sys が URL 予約を Host で照合する。別マシンからは `ssh -L` で転送して
+   `http://localhost:<port>` で叩く（`kabu.host` は `localhost` のまま）。127.0.0.1 でも駄目
+10. **検証環境 (18081) のトークンは検証環境ログイン中だけ** — 本番ログイン中に 18081 へ
+    /token すると `{"Code":4001013,"Message":"トークン取得失敗"}`（パスワードが正しくても）。
+    本番 (18080) は同時に 200 を返すので「パスワード違い」と誤診しやすい
 
 ## 6. Open issues（実弾移行の前提）
 

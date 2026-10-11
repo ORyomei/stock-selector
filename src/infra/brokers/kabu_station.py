@@ -14,6 +14,13 @@ kabuステーション (Windows アプリ) が起動した状態で、ローカ�
   4. 環境変数 KABU_API_PASSWORD に API パスワードを設定
      (もしくは config に直接記述。本番運用では環境変数推奨)
   5. kabuステーション にログインした状態でこのコードを実行
+  6. 別マシン (Linux) から使う場合は ssh -L 18081:127.0.0.1:18081 <windows> で転送し、
+     host は "localhost" のまま (deploy/systemd/stock-selector-kabu-tunnel.service が常駐)。
+     Windows の HTTP.sys が Host ヘッダで URL 予約を照合するため、127.0.0.1 や IP を
+     Host にすると 400 Bad Request (HTML) になる
+  7. 検証環境 (18081) のトークンは kabuステーションを検証環境でログインしている間だけ取れる
+     (本番ログイン中は 18080 のみ)。パスワードは .env の KABU_API_PASSWORD_STG (検証) /
+     KABU_API_PASSWORD_PRD (本番) を config の kabu.api_password_env で選ぶ
 
 注意:
   - 日本株のみ対応 (現物 / 信用)。米国株は非対応 (kabu API の仕様)
@@ -83,6 +90,31 @@ class KabuStationError(Exception):
     """kabu API 呼び出し失敗時の例外"""
 
 
+def _token_error_message(exc: Exception) -> str:
+    """/token 失敗を人が直せるメッセージにする (応答本文の Code/Message と環境のヒント付き)。
+
+    実測 (2026-10-12): 本番ログイン中の kabuステーションに検証環境 (18081) で /token すると
+    401 {"Code":4001013,"Message":"トークン取得失敗"}。本番 (18080) は同じ瞬間に 200。
+    """
+    body = ""
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        try:
+            body = resp.text.strip().replace("\n", " ")[:200]
+        except Exception:
+            body = ""
+    hint = "kabuステーションが起動・ログイン済みか確認してください。"
+    if "4001013" in body:
+        hint += (
+            " 検証環境 (18081) のトークンは kabuステーションを検証環境でログインしている間だけ取得できます"
+            " (本番ログイン中は 18080 のみ応答)。API パスワードの環境変数 (_STG / _PRD) の取り違えも確認。"
+        )
+    if "Bad Request" in body and "<HTML" in body.upper():
+        hint += " Host ヘッダが localhost 以外 (127.0.0.1 や IP 直指定) だと Windows の HTTP.sys が 400 を返します。host は localhost にして ssh -L で転送してください。"
+    detail = f" body={body}" if body else ""
+    return f"kabu API トークン取得失敗: {exc}.{detail} {hint}"
+
+
 class KabuStationBroker(BrokerInterface):
     """auカブコム証券 kabuステーション API ブローカー
 
@@ -147,10 +179,7 @@ class KabuStationBroker(BrokerInterface):
             logger.info("kabu API トークン取得成功")
             return token
         except requests.RequestException as exc:
-            raise KabuStationError(
-                f"kabu API トークン取得失敗: {exc}. "
-                f"kabuステーションが起動・ログイン済みか確認してください。"
-            ) from exc
+            raise KabuStationError(_token_error_message(exc)) from exc
 
     def _headers(self) -> dict[str, str]:
         return {"X-API-KEY": self._ensure_token()}
