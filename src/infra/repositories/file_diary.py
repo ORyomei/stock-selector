@@ -57,8 +57,13 @@ class FileDiaryRepository(DiaryRepository):
         now = datetime.now(UTC)
         timestamp = now.strftime("%Y-%m-%d_%H%M%S")
         ticker = trade_data.get("ticker", "unknown")
-        filename = f"{timestamp}_{ticker}_trade.json"
-        path = self._trades_dir / filename
+        path = self._trades_dir / f"{timestamp}_{ticker}_trade.json"
+        n = 1
+        while path.exists():
+            # 同一秒・同一銘柄の連続約定 (kabu E2E の BUY→即 CLOSE で実際に衝突) を上書きしない。
+            # 末尾は _trade.json のまま、日付プレフィックスも維持 (load_recent_trades の cutoff 比較用)
+            n += 1
+            path = self._trades_dir / f"{timestamp}_{ticker}_{n}_trade.json"
         with open(path, "w") as f:
             json.dump(trade_data, f, ensure_ascii=False, indent=2)
         return str(path)
