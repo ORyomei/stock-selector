@@ -497,6 +497,31 @@ def kabu_check(
     _json_out(result)
 
 
+# ── Kabu E2E (#2 (4)) ────────────────────────────────────
+@app.command(name="kabu-e2e")
+def kabu_e2e(
+    env: Annotated[str, typer.Option(help="stg=検証 (ダミー応答、発注形式の確認まで) / prd=本番 (実注文)")] = "stg",
+    ticker: Annotated[str, typer.Option(help="銘柄 (1 売買単位だけ買って即売る)")] = "1545.T",
+    real_money: Annotated[bool, typer.Option("--real-money", help="本番で実際に発注する (無ければ発注直前で止まる)")] = False,
+    max_cost: Annotated[float, typer.Option(help="概算コスト上限 (円)。超えたら発注しない")] = 20_000,
+    yes: Annotated[bool, typer.Option("--yes", help="発注前の確認プロンプトを省略")] = False,
+) -> None:
+    """kabu API 実接続 E2E: 1 単位の BUY→約定→positions→CLOSE→diary/kabu_e2e 記録 (#2 (4)).
+
+    共有 config は書き換えない (デーモンは simulator のまま)。ザラ場以外・上限超過では発注しない。
+    """
+    from core.kabu_e2e import run_e2e
+
+    result = run_e2e(
+        env=env, ticker=ticker, real_money=real_money, max_cost_jpy=max_cost,
+        confirm=None if yes else typer.confirm, log=typer.echo,
+    )
+    _json_out(result)
+    if not result.get("ok"):
+        typer.echo(f"❌ stage={result.get('stage')}: {result.get('error')}", err=True)
+        raise typer.Exit(1)
+
+
 # ── Trading Units ────────────────────────────────────────
 @app.command(name="trading-units")
 def trading_units(

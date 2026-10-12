@@ -211,6 +211,7 @@ uv run stock-selector backtest --days 30
 uv run stock-selector auto-trade ... / auto-analyze --market jp --ai
 uv run stock-selector dashboard / stop / auth
 uv run stock-selector kabu-check / trading-units      # kabuステーション API
+uv run stock-selector kabu-e2e --env prd --real-money  # 本番で 1 単位の BUY→約定→CLOSE (#2 (4)。無印は発注直前で停止)
 ```
 
 ## ディレクトリ構成
@@ -257,5 +258,5 @@ uv run pytest
 ## 注意事項
 
 - **投資助言ではない** — 出力は参考情報であり、投資判断の責任はユーザーにある
-- **ブローカー切替** — `config/trading_config.json` の `broker` で `"simulator"` / `"kabu"` を切替。既定はシミュレーター（仮想売買）。kabuステーション API のパスワードは `.env` の `KABU_API_PASSWORD_STG`（検証 18081）/ `KABU_API_PASSWORD_PRD`（本番 18080）に置き、`kabu.api_password_env` でどちらを使うか選ぶ。kabuステーションは Windows 機の localhost にしか API を開かないため、`stock-selector-kabu-tunnel.service`（`ssh -L` で `win` へ転送）を常駐させ `kabu.host` は `localhost` のままにする（HTTP.sys の Host 照合で IP 直指定は 400 になる）。検証環境と本番は API パスワードが別。検証環境は疎通確認専用（残高・板は null、発注はダミー応答で約定しない）
+- **ブローカー切替** — `config/trading_config.json` の `broker` で `"simulator"` / `"kabu"` を切替。既定はシミュレーター（仮想売買）。kabuステーション API のパスワードは `.env` の `KABU_API_PASSWORD_STG`（検証 18081）/ `KABU_API_PASSWORD_PRD`（本番 18080）に置き、`kabu.api_password_env` でどちらを使うか選ぶ。kabuステーションは Windows 機の localhost にしか API を開かないため、`stock-selector-kabu-tunnel.service`（`ssh -L` で `win` へ転送）を常駐させ `kabu.host` は `localhost` のままにする（HTTP.sys の Host 照合で IP 直指定は 400 になる）。検証環境と本番は API パスワードが別。検証環境は疎通確認専用（残高・板は null、発注はダミー応答で約定しない）。約定まで含めた実接続の確認は `kabu-e2e`（本番で 1 売買単位を成行で買って即売る。ザラ場以外・概算上限超過では発注せず、記録は `diary/kabu_e2e/`）
 - API キーは `.env` で管理（gitignore 済み）

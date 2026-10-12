@@ -32,6 +32,12 @@ def default_unit(ticker: str) -> int:
     return 100 if ticker.endswith(".T") else 1
 
 
+def stored_trading_unit(ticker: str) -> int | None:
+    """config/trading_units.json に保存済みの売買単位 (無ければ None。既定値で誤魔化さない)。"""
+    unit = _load().get(ticker)
+    return int(unit) if unit else None
+
+
 def get_trading_unit(ticker: str) -> int:
     """銘柄の売買単位を返す。config 優先、無ければ通貨ベースのデフォルト。"""
     unit = _load().get(ticker)

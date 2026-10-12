@@ -22,7 +22,10 @@ kabuステーション (Windows アプリ) が起動した状態で、ローカ�
      KABU_API_PASSWORD_PRD (本番) を config の kabu.api_password_env で選ぶ (4001013 = 不一致)
   8. 検証環境は疎通とリクエスト形式の確認専用: wallet/symbol/board は null、positions/orders は空、
      sendorder は {"Result":0,"OrderId":null} を返す (約定・ポジション反映の E2E はできない。
-     本番で最小単位の実注文を出すしかない)
+     本番で最小単位の実注文を出すしかない → `stock-selector kabu-e2e --env prd --real-money`
+     (core/kabu_e2e.py: 1 売買単位の BUY→約定→positions→CLOSE を一気通貫、記録は diary/kabu_e2e/))
+  9. {"Code":4001007,"Message":"ログイン認証エラー"} は kabuステーション本体が未ログイン
+     (起動直後・セッション切れ)。両ポートで同じコードになる。Windows 側で再ログインする
 
 注意:
   - 日本株のみ対応 (現物 / 信用)。米国株は非対応 (kabu API の仕様)
@@ -112,6 +115,12 @@ def _token_error_message(exc: Exception) -> str:
             " 4001013 は接続した環境の API パスワード不一致です。検証環境 (18081) と本番 (18080) は"
             " パスワードが別なので、.env の KABU_API_PASSWORD_STG (検証) / _PRD (本番) と"
             " kabuステーションの API 設定を突き合わせてください。"
+        )
+    if "4001007" in body:
+        hint += (
+            " 4001007 は kabuステーション自体が未ログイン (起動直後・セッション切れ・ログアウト) の状態です。"
+            " Windows 側で kabuステーションにログインし直してください"
+            " (検証/本番どちらのポートでも同じコードになります。2026-10-12 実測)。"
         )
     if "Bad Request" in body and "<HTML" in body.upper():
         hint += " Host ヘッダが localhost 以外 (127.0.0.1 や IP 直指定) だと Windows の HTTP.sys が 400 を返します。host は localhost にして ssh -L で転送してください。"
@@ -464,6 +473,44 @@ class KabuStationBroker(BrokerInterface):
             int(d.get("Qty", 0) or 0) for d in details if d.get("RecType") == 8
         )
         return total_value / total_qty if total_qty > 0 else None
+
+    def refresh_order(self, order: Order) -> Order:
+        """発注済み注文の最新状態を /orders から 1 回取り直す (約定待ちのポーリング用)。"""
+        return self._resolve_order(
+            order.id,
+            ticker=order.ticker,
+            side=order.side,
+            quantity=order.quantity,
+            entry_price=order.entry_price,
+            order_type=order.order_type,
+            stop_loss=order.stop_loss,
+            take_profit=order.take_profit,
+            poll=1,
+        )
+
+    def get_board_price(self, ticker: str) -> float | None:
+        """板スナップショットから概算単価を返す。
+
+        成行買いのコスト見積もり用に売り気配 (AskPrice) を優先し、無ければ現在値 → 前日終値。
+        検証環境は板が null なので None。
+        """
+        symbol, exchange = self._parse_ticker(ticker, for_order=False)
+        data = self._request("GET", f"/board/{symbol}@{exchange}") or {}
+        for key in ("AskPrice", "CurrentPrice", "PreviousClose"):
+            value = data.get(key)
+            if value:
+                return float(value)
+        return None
+
+    def get_order_commission(self, order_id: str) -> dict[str, float]:
+        """注文の約定明細 (RecType=8) に付く手数料・消費税の合計 (#4 税・手数料の実測用)。"""
+        rows = self._request("GET", "/orders", params={"id": str(order_id)}) or []
+        details = rows[0].get("Details", []) if rows else []
+        fills = [d for d in details if d.get("RecType") == 8]
+        return {
+            "commission_jpy": float(sum(float(d.get("Commission") or 0) for d in fills)),
+            "commission_tax_jpy": float(sum(float(d.get("CommissionTax") or 0) for d in fills)),
+        }
 
     def cancel_order(self, order_id: str) -> bool:
         """注文キャンセル。"""

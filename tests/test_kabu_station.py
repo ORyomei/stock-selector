@@ -91,3 +91,57 @@ def test_request_gives_up_after_retries_on_persistent_429(monkeypatch):
         assert "4001006" in str(e)
     else:
         raise AssertionError("429 が続いたら KabuStationError")
+
+
+def test_token_error_hints_station_not_logged_in_for_4001007():
+    msg = _token_error_message(_http_error('{"Code":4001007,"Message":"ログイン認証エラー"}'))
+    assert "4001007" in msg and "未ログイン" in msg and "再ログイン" in msg or "ログインし直して" in msg
+
+
+def _broker_with_responses(monkeypatch, responses: dict):
+    broker = KabuStationBroker({"host": "localhost", "port": 18080, "api_password": "x"})
+    calls = []
+
+    def _request(method, path, *, json_body=None, params=None):
+        calls.append((method, path, params))
+        return responses[path]
+
+    monkeypatch.setattr(broker, "_request", _request)
+    return broker, calls
+
+
+def test_get_board_price_prefers_ask_then_current_then_previous_close(monkeypatch):
+    broker, _ = _broker_with_responses(monkeypatch, {"/board/1545@1": {"AskPrice": 247.1, "CurrentPrice": 246.8}})
+    assert broker.get_board_price("1545.T") == 247.1
+    broker, _ = _broker_with_responses(monkeypatch, {"/board/1545@1": {"AskPrice": 0, "CurrentPrice": 246.8}})
+    assert broker.get_board_price("1545.T") == 246.8
+    broker, _ = _broker_with_responses(monkeypatch, {"/board/1545@1": {"PreviousClose": 245.0}})
+    assert broker.get_board_price("1545.T") == 245.0
+    broker, _ = _broker_with_responses(monkeypatch, {"/board/1545@1": None})  # 検証環境
+    assert broker.get_board_price("1545.T") is None
+
+
+def test_get_order_commission_sums_only_fill_details(monkeypatch):
+    rows = [{"ID": "X", "Details": [
+        {"RecType": 1, "Commission": 99, "CommissionTax": 9},
+        {"RecType": 8, "Commission": 0, "CommissionTax": 0, "Qty": 5},
+        {"RecType": 8, "Commission": 55, "CommissionTax": 5.5, "Qty": 5},
+    ]}]
+    broker, calls = _broker_with_responses(monkeypatch, {"/orders": rows})
+    assert broker.get_order_commission("X") == {"commission_jpy": 55.0, "commission_tax_jpy": 5.5}
+    assert calls[0][2] == {"id": "X"}
+
+
+def test_refresh_order_resolves_fill_from_orders(monkeypatch):
+    from datetime import UTC, datetime
+
+    from domain.models import Order, OrderSide, OrderStatus, OrderType
+
+    rows = [{"ID": "X", "State": 5, "OrderQty": 10, "CumQty": 10,
+             "Details": [{"RecType": 8, "Price": 246.5, "Qty": 10}]}]
+    broker, _ = _broker_with_responses(monkeypatch, {"/orders": rows})
+    pending = Order(id="X", ticker="1545.T", side=OrderSide.BUY, quantity=10, entry_price=246.8,
+                    order_type=OrderType.MARKET, order_time=datetime.now(UTC))
+    done = broker.refresh_order(pending)
+    assert done.status == OrderStatus.FILLED and done.filled_quantity == 10 and done.fill_price == 246.5
+    assert done.id == "X" and done.side == OrderSide.BUY

@@ -63,6 +63,7 @@ uv run stock-selector stop                    # 手動停止 (systemd は再起�
 sudo systemctl restart stock-selector-dashboard  # ダッシュボード (src/web 変更の反映。常駐は systemd)
 systemctl status stock-selector-kabu-tunnel      # kabu API への ssh トンネル (win の localhost:18080/18081 を転送)
 uv run stock-selector kabu-check                 # kabu API 疎通 (トンネル + kabuステーション起動・ログインが前提)
+uv run stock-selector kabu-e2e --env prd         # 本番で 1 単位の BUY→約定→CLOSE を一気通貫 (--real-money 無しは発注直前で止まる)
 uv run stock-selector portfolio status        # 残高確認
 tail -f logs/auto_trade_daemon.log            # ログ監視
 ```
@@ -95,10 +96,16 @@ tail -f logs/auto_trade_daemon.log            # ログ監視
    `http://localhost:<port>` で叩く（`kabu.host` は `localhost` のまま）。127.0.0.1 でも駄目
 10. **検証環境 (18081) と本番 (18080) は API パスワードが別** — 検証側のパスワード違いは
     `{"Code":4001013,"Message":"トークン取得失敗"}`。ログイン環境は無関係で、本番ログイン中でも
-    18081 は応答する（2026-10-12 に「検証環境ログインが必要」と一度誤診した）
+    18081 は応答する（2026-10-12 に「検証環境ログインが必要」と一度誤診した）。
+    一方 `{"Code":4001007,"Message":"ログイン認証エラー"}` は kabuステーション本体が未ログイン
+    （起動直後・セッション切れ）で、両ポートとも同じコードになる。Windows 側で再ログインする
 11. **検証環境は疎通確認専用** — wallet/symbol/board は null、positions/orders は空、sendorder は
     `{"Result":0,"OrderId":null}`。約定→ポジション反映→reconcile の E2E は本番で最小単位
-    （例: 1545.T 10 口 ≒ 数千円）の実注文でしか検証できない
+    （例: 1545.T 10 口 ≒ 数千円）の実注文でしか検証できない →
+    `uv run stock-selector kabu-e2e --env prd --real-money`（`core/kabu_e2e.py`）。共有 config は
+    触らず、ザラ場（9:00-11:20 / 12:30-15:15 JST）以外・概算 `--max-cost`（既定 2 万円）超過では
+    発注しない。記録は `diary/kabu_e2e/trades/`（`diary/trades/` に混ぜるとシミュレーション成績に
+    実弾テストが紛れる）。BUY が約定しなければ取消、約定したら必ず CLOSE まで進み保有を残さない
 12. **kabu API には実行回数制限がある** — `429 {"Code":4001006,"Message":"API実行回数エラー"}`。
     reconcile を 3 連続（`/wallet/cash` 6 回 / 2 秒）で発生。`_request` が 1.2 秒待って 3 回まで
     再試行する（`kabu.rate_limit_retries` / `rate_limit_wait_sec`）
@@ -106,7 +113,8 @@ tail -f logs/auto_trade_daemon.log            # ログ監視
 ## 6. Open issues（実弾移行の前提）
 
 `label:real-trading-gap` 参照。移行判断の前提ゲートは:
-- 🔴 **#2 kabu API E2E** — kabuステーション + `KABU_API_PASSWORD` が必要（ユーザー作業）
+- 🔴 **#2 kabu API E2E** — (1)(2)(3)(5) 完了、残り (4) は本番の最小実注文（`kabu-e2e`、ザラ場に
+  kabuステーションをログインした状態で実行。2026-10-12 に本番口座へ入金済み）
 - 🔴 **#4 税・手数料モデル** — 未着手。回転頻度の正当性評価に必須
 - 🟡 #5（ブローカー逆指値。スリッページ実測2点あり: −5%設定→−8.3% / −6.3%）
   / #7（縮退通知）/ #8（バックアップ）/ #14（入口品質、計測中）
